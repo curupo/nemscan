@@ -1,0 +1,16 @@
+{
+  "name": "NEMSCAN - NEM Blockchain Explorer",
+  "short_name": "NEMSCAN",
+  "description": "Browse blocks, transactions, accounts, mosaics, and namespaces on the NEM blockchain.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#6c47ff",
+  "icons": [
+    {
+      "src": "/nem_logo.png",
+      "sizes": "any",
+      "type": "image/png"
+    }
+  ]
+}
