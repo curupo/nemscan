@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import { keccak_256 } from '@noble/hashes/sha3.js';
 import { ripemd160 } from '@noble/hashes/legacy.js';
 import { DatabaseSync } from 'node:sqlite';
@@ -6,6 +7,15 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 const app = express();
 const PORT = 3000;
+
+app.disable('x-powered-by');
+app.use(compression());
+app.use((req, res, next) => {
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
 
 // Carries the per-request "preferred connection node" (chosen via the navbar's
 // node-switch dropdown and sent back as a cookie) through to nemFetch(), without
@@ -1400,6 +1410,39 @@ app.get('/api/accounts/more', async (req, res) => {
   }
 });
 
+app.get('/robots.txt', (req, res) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.send('User-agent: *\nAllow: /\nSitemap: http://localhost:3000/sitemap.xml\n');
+});
+
+app.get('/sitemap.xml', (req, res) => {
+  const base = `${req.protocol}://${req.get('host')}`;
+  const urls = ['/', '/blocks', '/txs', '/namespaces', '/mosaics', '/accounts', '/nodes', '/polls'];
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map(u => `  <url><loc>${base}${u}</loc></url>`).join('\n')}\n</urlset>`;
+  res.setHeader('Content-Type', 'application/xml');
+  res.send(xml);
+});
+
+app.use((req, res) => {
+  res.status(404).setHeader('Content-Type', 'text/html').send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <link rel="icon" type="image/png" href="/nem_logo.png">
+  <title>404 - Page Not Found | NEMSCAN</title>
+  <style>${sharedCSS()}</style>
+</head>
+<body>
+<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:16px;text-align:center;padding:40px 20px;">
+  <img src="/nem_logo.png" width="56" height="56" alt="NEM" style="opacity:.5;">
+  <h1 style="font-size:64px;font-weight:700;margin:0;opacity:.2;">404</h1>
+  <p style="font-size:18px;font-weight:600;margin:0;">Page not found</p>
+  <p style="color:var(--text-2);margin:0;">The page you're looking for doesn't exist.</p>
+  <a href="/" style="margin-top:8px;padding:10px 24px;background:var(--accent);color:#fff;border-radius:8px;text-decoration:none;font-weight:600;">Go Home</a>
+</div>
+</body></html>`);
+});
+
 // Keep the namespace, mosaic, rich-list and price caches warm: populate on
 // boot, then refresh periodically in the background so page requests never
 // have to wait on the slow NIS queries / large source pages. Mosaics are
@@ -1881,6 +1924,15 @@ function homePageHTML({ height, blocks, txs, avgBlockSecs, error }) {
 <html lang="en">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <link rel="icon" type="image/png" href="/nem_logo.png">
+  <link rel="apple-touch-icon" href="/nem_logo.png">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="description" content="NEMSCAN - NEM (XEM) blockchain explorer. Browse blocks, transactions, accounts, mosaics, and namespaces on the NEM blockchain.">
+  <meta property="og:title" content="NEMSCAN - NEM (XEM) Blockchain Explorer">
+  <meta property="og:description" content="Browse blocks, transactions, accounts, mosaics, and namespaces on the NEM blockchain.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="/nem_logo.png">
+  <meta name="twitter:card" content="summary">
   ${themeInitScript()}
   <title>NEMSCAN - NEM (XEM) Blockchain Explorer</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
@@ -1903,6 +1955,9 @@ function shell(title, heroSection, cardId, apiUrl, placeholder, navActive = '/bl
 <html lang="en">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <link rel="icon" type="image/png" href="/nem_logo.png">
+  <link rel="apple-touch-icon" href="/nem_logo.png">
+  <link rel="manifest" href="/manifest.json">
   ${themeInitScript()}
   <title>${title}</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
@@ -1927,6 +1982,9 @@ function accountShell(address) {
 <html lang="en">
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <link rel="icon" type="image/png" href="/nem_logo.png">
+  <link rel="apple-touch-icon" href="/nem_logo.png">
+  <link rel="manifest" href="/manifest.json">
   ${themeInitScript()}
   <title>Account ${shortAddr} - NEMSCAN</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
