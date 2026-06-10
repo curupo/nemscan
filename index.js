@@ -1585,15 +1585,48 @@ function footerHTML() {
   const discordIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.317 4.37a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.076.076 0 0 0-.04.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.06.06 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z"/></svg>`;
   const xIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>`;
   const heartIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54z"/></svg>`;
+  const upArrowIcon = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l-8 8h5v8h6v-8h5z"/></svg>`;
   return `<footer class="site-footer"><div class="site-footer-inner">
-    <div class="footer-links">
-      <a href="https://github.com/NemProject" target="_blank" rel="noopener">${githubIcon}GitHub</a>
-      <a href="https://discord.gg/NMA9YQ55td" target="_blank" rel="noopener">${discordIcon}Discord</a>
-      <a href="https://x.com/NEMofficial" target="_blank" rel="noopener">${xIcon}X (Twitter)</a>
+    <div class="footer-top-row">
+      <a class="footer-back-to-top" href="#" onclick="window.scrollTo({top:0,behavior:'smooth'});return false;">${upArrowIcon}Back to Top</a>
     </div>
+    <hr class="footer-hr">
+    <div class="footer-content">
+      <div class="footer-col footer-col-brand">
+        <a class="footer-brand" href="https://nem.io" target="_blank" rel="noopener">
+          <img src="/nem_logo.png" width="28" height="28" alt="NEM">
+          <span>Powered by NEM (XEM)</span>
+        </a>
+        <p class="footer-desc">NEMSCAN is a Block Explorer and Analytics Platform for the NEM (XEM) blockchain.</p>
+      </div>
+      <div class="footer-col">
+        <h4 class="footer-col-title">Community</h4>
+        <ul class="footer-col-list">
+          <li><a href="https://github.com/NemProject" target="_blank" rel="noopener">${githubIcon}GitHub</a></li>
+          <li><a href="https://discord.gg/NMA9YQ55td" target="_blank" rel="noopener">${discordIcon}Discord</a></li>
+          <li><a href="https://x.com/NEMofficial" target="_blank" rel="noopener">${xIcon}X (Twitter)</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4 class="footer-col-title">Resources</h4>
+        <ul class="footer-col-list">
+          <li><a href="https://nem.io" target="_blank" rel="noopener">nem.io</a></li>
+          <li><a href="https://nemnodes.org/" target="_blank" rel="noopener">nemnodes.org</a></li>
+          <li><a href="https://nem.io/supernodes/" target="_blank" rel="noopener">Supernodes</a></li>
+          <li><a href="https://explorer.nemtool.com/" target="_blank" rel="noopener">explorer.nemtool.com</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4 class="footer-col-title">Project</h4>
+        <ul class="footer-col-list">
+          <li><a class="footer-donate" href="/account/NAYLN6AV23T63J3HDC2BTMJFS5WMFXYYZDOIWI5W" rel="noopener">${heartIcon}Donations</a></li>
+          <li><a href="https://github.com/curupo/nemscan" target="_blank" rel="noopener">${githubIcon}Source Code</a></li>
+        </ul>
+      </div>
+    </div>
+    <hr class="footer-hr">
     <div class="footer-bottom">
       <div class="footer-copy">© NEM Community 2026</div>
-      <a class="footer-donate" href="/account/NAYLN6AV23T63J3HDC2BTMJFS5WMFXYYZDOIWI5W" rel="noopener">Donations ${heartIcon}</a>
     </div>
   </div></footer>`;
 }
@@ -1744,7 +1777,6 @@ function heroNamespace(fqn) {
   return `<div class="hero"><div class="hero-inner">
     <h1 style="margin-bottom:10px;">Namespace Detail</h1>
     <div class="acct-addr-row">
-      <span class="acct-addr-icon">#</span>
       <code class="acct-addr-text">${esc(fqn)}</code>
       <button class="copy-btn-hero" onclick="copy('${esc(fqn)}')">copy</button>
     </div>
@@ -1782,10 +1814,7 @@ function heroAccounts() {
 
 function heroNodes() {
   return `<div class="hero"><div class="hero-inner">
-    <div class="hero-row hero-row-between">
-      <h1>Supernodes</h1>
-      <a class="hero-link" href="https://nem.io/supernode/" target="_blank" rel="noopener">nem.io/supernode &#8599;</a>
-    </div>
+    <h1>Supernodes</h1>
   </div></div>`;
 }
 
@@ -2077,7 +2106,7 @@ function blocksTableHTML(blocks, page, totalPages, limit, chainHeight) {
   }).join('');
 
   const htmx = p => `hx-get="/api/blocks?page=${p}&limit=${limit}" hx-target="#blocks-card" hx-swap="innerHTML"`;
-  const pBtn = (lbl, p, off) => off ? `<span class="p-btn off">${lbl}</span>` : `<a class="p-btn" ${htmx(p)} href="#">${lbl}</a>`;
+  const pBtn = (lbl, p, off) => off ? `<span class="p-btn off">${lbl}</span>` : `<a class="p-btn" ${htmx(p)} href="#"><span class="lm-text">${lbl}</span><span class="lm-spinner"></span></a>`;
   const rItem = n => `<a class="rows-menu-item${n===limit ? ' active' : ''}" hx-get="/api/blocks?page=1&limit=${n}" hx-target="#blocks-card" hx-swap="innerHTML" href="#" role="menuitem">${n}</a>`;
   const rowsCtrl = `
       <div class="rows-ctrl">
@@ -2621,7 +2650,7 @@ function namespaceDetailHTML(ns, root, subNamespaces, mosaics) {
     ['Namespace',           `<span class="mono">${esc(ns.fqn)}</span> <button class="copy-btn" onclick="copy('${esc(ns.fqn)}')">copy</button>`],
     ['Root Namespace',      isRoot ? `<span class="mono">${esc(root)}</span>` : `<a href="/namespace/${encodeURIComponent(root)}" class="mono-link">${esc(root)}</a>`],
     ['Owner',               `<a href="/account/${ns.owner}" class="mono-link" title="${ns.owner}">${truncKey(ns.owner)}</a> <button class="copy-btn" onclick="copy('${ns.owner}')">copy</button>`],
-    ['Registered at Block', `<a href="/block/${ns.height}" class="mono-link">${ns.height.toLocaleString()}</a>`],
+    ['Registered at Block', `<a href="/block/${ns.height}" class="mono-link">${ns.height}</a>`],
     ['Sub-namespaces',      subNamespaces.length ? `<strong>${subNamespaces.length}</strong>` : `<span class="muted">None</span>`],
     ['Mosaics',             mosaics.length ? `<strong>${mosaics.length}</strong>` : `<span class="muted">None</span>`],
   ].map(([l,v]) => `<div class="ov-row"><div class="ov-label">${l}</div><div class="ov-value">${v}</div></div>`).join('');
@@ -2759,6 +2788,7 @@ function nodesListHTML(nodes) {
     <div class="card-title">Active Supernodes <span class="live-pill"><span class="live-dot"></span>Live</span></div>
     <span class="total-txt"><strong>${nodes.length}</strong> active</span>
   </div>
+  <p class="archive-note"><span class="archive-note-icon">&#9432;</span>The node information on this page is sourced from <a href="https://nem.io/supernodes/" target="_blank" rel="noopener">nem.io/supernode</a>.</p>
   <div class="tbl-wrap"><table>
     <thead><tr><th>#</th><th>Name</th><th>Endpoint</th><th>Status</th></tr></thead>
     <tbody>${nodes.map((n, i) => renderNodeRow(n, i + 1)).join('')}</tbody>
@@ -2912,25 +2942,39 @@ function sharedCSS() { return `
 
   /* Footer */
   .site-footer { background:var(--nav); border-top:1px solid color-mix(in srgb, var(--nav-text) 7%, transparent); margin-top:32px; }
-  .site-footer-inner { max-width:1280px; margin:0 auto; padding:30px 24px 26px; display:flex; flex-direction:column; align-items:center; gap:14px; text-align:center; }
-  .footer-links { display:flex; gap:32px; flex-wrap:wrap; justify-content:center; }
-  .footer-links a { display:inline-flex; align-items:center; gap:7px; color:var(--link); text-decoration:none; font-size:12.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
-  .footer-links a svg { width:16px; height:16px; fill:currentColor; }
-  .footer-links a:hover { color:var(--link-h); }
-  .footer-bottom { display:flex; align-items:center; justify-content:space-between; gap:16px; width:100%; }
-  .footer-copy { color:var(--nav-text-2); font-size:12px; text-align:left; }
-  .footer-donate { display:inline-flex; align-items:center; gap:7px; color:var(--nav-text-2); text-decoration:none; font-size:12px; letter-spacing:.04em; text-align:right; font-style:normal; }
-  .footer-donate svg { width:12px; height:12px; fill:#dc3545; }
-  .footer-donate:hover { color:var(--text); }
+  .site-footer-inner { max-width:1280px; margin:0 auto; padding:20px 24px 26px; display:flex; flex-direction:column; align-items:center; gap:18px; text-align:center; }
+  .footer-top-row { display:flex; align-items:center; justify-content:flex-end; gap:16px; width:100%; flex-wrap:wrap; }
+  .footer-back-to-top { display:inline-flex; align-items:center; gap:7px; color:var(--link); text-decoration:none; font-size:12.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; cursor:pointer; }
+  .footer-back-to-top svg { width:14px; height:14px; fill:currentColor; }
+  .footer-back-to-top:hover { color:var(--link-h); }
+  .footer-hr { border:none; border-top:1px solid color-mix(in srgb, var(--nav-text) 9%, transparent); width:100%; margin:0; }
+  .footer-content { display:flex; justify-content:space-between; gap:32px; flex-wrap:wrap; width:100%; text-align:left; }
+  .footer-col { flex:1 1 150px; min-width:140px; }
+  .footer-col-brand { flex:2 1 220px; }
+  .footer-brand { display:inline-flex; align-items:center; gap:9px; color:var(--nav-text); text-decoration:none; font-weight:700; font-size:14px; margin-bottom:10px; }
+  .footer-brand img { border-radius:6px; }
+  .footer-brand:hover { color:var(--link); }
+  .footer-desc { color:var(--nav-text-2); font-size:12.5px; line-height:1.6; margin:0; max-width:320px; }
+  .footer-col-title { color:var(--nav-text); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin:0 0 12px; }
+  .footer-col-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+  .footer-col-list a { display:inline-flex; align-items:center; gap:8px; color:var(--nav-text-2); text-decoration:none; font-size:12.5px; }
+  .footer-col-list a:hover { color:var(--link); }
+  .footer-col-list a svg { width:14px; height:14px; fill:currentColor; flex-shrink:0; }
+  .footer-donate svg { fill:#dc3545; }
+  .footer-bottom { width:100%; text-align:center; }
+  .footer-copy { color:var(--nav-text-2); font-size:12px; }
+  @media (max-width:560px) {
+    .footer-content { flex-direction:column; align-items:center; text-align:center; }
+    .footer-col { width:100%; }
+    .footer-col-list { align-items:center; }
+  }
 
   /* Hero */
   .hero { background:linear-gradient(180deg,var(--hero-1) 0%,var(--hero-2) 100%); border-bottom:1px solid color-mix(in srgb, var(--nav-text) 8%, transparent); }
   .hero-inner { max-width:1280px; margin:0 auto; padding:22px 24px; }
   .hero h1 { color:var(--nav-text); font-size:21px; font-weight:600; }
   .hero-row { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-  .hero-row-between { justify-content:space-between; }
   .hero-hl { color:var(--link); }
-  .hero-link { color:var(--link); font-size:13px; font-weight:600; }
 
   /* Home page */
   .home-hero { background:linear-gradient(180deg,var(--hero-1) 0%,var(--hero-2) 100%); border-bottom:1px solid color-mix(in srgb, var(--nav-text) 8%, transparent); text-align:center; }
@@ -3047,9 +3091,13 @@ function sharedCSS() { return `
   .pag-ctrl { display:flex; align-items:center; gap:8px; }
   .pg-info { font-size:13px; color:var(--muted); }
   .pg-info strong { color:var(--text); }
-  .p-btn { padding:5px 11px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text-2); font-size:13px; font-weight:500; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; }
+  .p-btn { padding:5px 11px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text-2); font-size:13px; font-weight:500; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; gap:7px; }
   .p-btn:hover { background:var(--surface-2); color:var(--text-2); text-decoration:none; }
   .p-btn.off { opacity:.38; pointer-events:none; }
+  .p-btn.htmx-request { pointer-events:none; opacity:.8; }
+  .p-btn .lm-spinner { display:none; width:14px; height:14px; border:2px solid var(--border); border-top-color:var(--link); border-radius:50%; animation:spin .7s linear infinite; }
+  .p-btn.htmx-request .lm-text { display:none; }
+  .p-btn.htmx-request .lm-spinner { display:inline-block; }
 
   /* Block / Account overview rows */
   .ov-row { display:flex; align-items:flex-start; padding:12px 20px; border-bottom:1px solid var(--border); gap:0; }
