@@ -82,6 +82,11 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS daily_tx_counts (
+    date TEXT PRIMARY KEY,
+    tx_count INTEGER NOT NULL DEFAULT 0,
+    block_count INTEGER NOT NULL DEFAULT 0
+  );
 `);
 try { db.exec('ALTER TABLE mosaics ADD COLUMN height INTEGER'); } catch {}
 try { db.exec('ALTER TABLE mosaics ADD COLUMN time_stamp INTEGER'); } catch {}
@@ -163,6 +168,12 @@ const _accSelectStmt = db.prepare('SELECT rank, address, balance, info FROM rich
 const _accCountStmt = db.prepare('SELECT COUNT(*) AS c FROM richlist');
 const _metaUpsertStmt = db.prepare('INSERT OR REPLACE INTO cache_meta (key, value) VALUES (?, ?)');
 const _metaSelectStmt = db.prepare('SELECT value FROM cache_meta WHERE key = ?');
+const _dailyTxBumpStmt = db.prepare(`
+  INSERT INTO daily_tx_counts (date, tx_count, block_count) VALUES (?, ?, 1)
+  ON CONFLICT(date) DO UPDATE SET tx_count = tx_count + excluded.tx_count, block_count = block_count + 1
+`);
+const _dailyTxRecentStmt = db.prepare('SELECT date, tx_count FROM daily_tx_counts ORDER BY date DESC LIMIT ?');
+const _dailyTxOldestStmt = db.prepare('SELECT MIN(date) AS d FROM daily_tx_counts');
 
 function getCachedNamespaces(limit = 25, offset = 0) {
   return _nsSelectStmt.all(limit, offset);
@@ -240,6 +251,18 @@ function setCacheMeta(key, value) {
   _metaUpsertStmt.run(key, String(value));
 }
 
+function bumpDailyTxCount(dateStr, txCount) {
+  _dailyTxBumpStmt.run(dateStr, txCount);
+}
+
+function getDailyTxCounts(limit) {
+  return _dailyTxRecentStmt.all(limit).reverse();
+}
+
+function getOldestDailyTxDate() {
+  return _dailyTxOldestStmt.get().d;
+}
+
 const NEM_NODES = [
   'https://nebuta.kasanetalk.net:7891',
   'https://tanabata.kasanetalk.net:7891',
@@ -254,6 +277,12 @@ const NEM_NODES = [
 ];
 const NEM_EPOCH_MS = 1427587585000;
 const blockCache = new Map();
+// Number of most-recent calendar days (UTC, including today) shown in the
+// home page's "TXNS / DAY" chart.
+const DAILY_TX_DAYS = 7;
+// NEM's total XEM supply was fixed at genesis and never changes — harvesting
+// only redistributes transaction fees, it doesn't mint new XEM.
+const XEM_TOTAL_SUPPLY = 8_999_999_999;
 
 const TX_TYPES = {
   257: 'Transfer', 2049: 'Importance', 4097: 'Multisig Mod',
@@ -264,6 +293,8 @@ const TX_TYPES = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function nemDate(ts) { return new Date(NEM_EPOCH_MS + ts * 1000); }
+
+function dateKeyFromTs(ts) { return nemDate(ts).toISOString().slice(0, 10); }
 
 function timeAgo(date) {
   const s = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -310,13 +341,17 @@ async function getHeight() {
   return d.height;
 }
 
-async function getBlock(height) {
-  if (blockCache.has(height)) return blockCache.get(height);
-  const block = await nemFetch('/block/at/public', {
+async function fetchBlockRaw(height) {
+  return nemFetch('/block/at/public', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ height }),
   });
+}
+
+async function getBlock(height) {
+  if (blockCache.has(height)) return blockCache.get(height);
+  const block = await fetchBlockRaw(height);
   blockCache.set(height, block);
   if (blockCache.size > 500) blockCache.delete(blockCache.keys().next().value);
   return block;
@@ -818,6 +853,77 @@ async function refreshPriceCache() {
   } finally {
     _refreshingPrice = false;
   }
+}
+
+// ── Daily transaction count cache (home page "TXNS / DAY" chart) ──────────────
+// NIS1 has no endpoint for historical transaction counts, so we derive them
+// ourselves by walking blocks one at a time and bucketing each block's
+// transaction count by its UTC calendar date. A full DAILY_TX_DAYS window is
+// far too many blocks to fetch in one pass, so each call advances the scanned
+// range a little (forward to pick up new blocks, backward to backfill older
+// days) and persists progress in cache_meta so it resumes across restarts.
+const DAILY_TX_BACKFILL_CHUNK = 60;
+
+async function scanBlockHeightsForDailyTx(heights) {
+  const BATCH = 10;
+  for (let i = 0; i < heights.length; i += BATCH) {
+    const batch = heights.slice(i, i + BATCH);
+    const blocks = await Promise.all(batch.map(h => fetchBlockRaw(h).catch(() => null)));
+    for (const block of blocks) {
+      if (!block?.timeStamp) continue;
+      bumpDailyTxCount(dateKeyFromTs(block.timeStamp), (block.transactions || []).length);
+    }
+    if (i + BATCH < heights.length) await new Promise(r => setTimeout(r, 150));
+  }
+}
+
+let _refreshingDailyTxStats = false;
+async function refreshDailyTxStats() {
+  if (_refreshingDailyTxStats) return;
+  _refreshingDailyTxStats = true;
+  try {
+    const height = await getHeight();
+    let maxH = parseInt(getCacheMeta('daily_tx_scan_max_height'));
+    let minH = parseInt(getCacheMeta('daily_tx_scan_min_height'));
+    if (!Number.isFinite(maxH)) { maxH = height - 1; minH = height; }
+
+    if (height > maxH) {
+      const heights = [];
+      for (let h = maxH + 1; h <= height; h++) heights.push(h);
+      await scanBlockHeightsForDailyTx(heights);
+      maxH = height;
+      setCacheMeta('daily_tx_scan_max_height', maxH);
+    }
+
+    if (!getCacheMeta('daily_tx_backfill_done')) {
+      const cutoff = new Date(Date.now() - (DAILY_TX_DAYS - 1) * 86400000).toISOString().slice(0, 10);
+      const oldest = getOldestDailyTxDate();
+      if ((oldest && oldest <= cutoff) || minH <= 1) {
+        setCacheMeta('daily_tx_backfill_done', '1');
+      } else {
+        const to = Math.max(1, minH - DAILY_TX_BACKFILL_CHUNK);
+        const heights = [];
+        for (let h = minH - 1; h >= to; h--) heights.push(h);
+        await scanBlockHeightsForDailyTx(heights);
+        minH = to;
+        setCacheMeta('daily_tx_scan_min_height', minH);
+      }
+    }
+  } catch (err) {
+    console.error('Daily tx stats refresh failed:', err.message);
+  } finally {
+    _refreshingDailyTxStats = false;
+  }
+}
+
+// Self-rescheduling rather than setInterval: backfill runs in quick
+// succession (every 5s) until DAILY_TX_DAYS of history is covered, then
+// settles into an infrequent catch-up poll (every 5min).
+function scheduleDailyTxStatsRefresh() {
+  refreshDailyTxStats().finally(() => {
+    const delay = getCacheMeta('daily_tx_backfill_done') ? 5 * 60 * 1000 : 5 * 1000;
+    setTimeout(scheduleDailyTxStatsRefresh, delay);
+  });
 }
 
 async function getTxsFromBlocks(fromHeight, limit = 25) {
@@ -1468,6 +1574,7 @@ setTimeout(() => {
   // then every 6 hours. Covers all known namespaces and refreshes current supply.
   setTimeout(refreshAllMosaicsDeep, 2 * 60 * 1000);
   setInterval(refreshAllMosaicsDeep, 6 * 60 * 60 * 1000);
+  scheduleDailyTxStatsRefresh();
 }, 3000);
 
 app.listen(PORT, '0.0.0.0', () => console.log(`NEMSCAN → http://localhost:${PORT}/`));
@@ -1489,6 +1596,10 @@ function formatUsdPrice(price) {
   if (price >= 1) return price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   if (price >= 0.01) return price.toFixed(4);
   return price.toFixed(6);
+}
+
+function formatMarketCap(price) {
+  return new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 }).format(price * XEM_TOTAL_SUPPLY);
 }
 
 function xemPriceHTML() {
@@ -1621,8 +1732,8 @@ function footerHTML() {
       <div class="footer-col">
         <h4 class="footer-col-title">Project</h4>
         <ul class="footer-col-list">
-          <li><a class="footer-donate" href="/account/NAYLN6AV23T63J3HDC2BTMJFS5WMFXYYZDOIWI5W" rel="noopener">${heartIcon}Donations</a></li>
           <li><a href="https://github.com/curupo/nemscan" target="_blank" rel="noopener">${githubIcon}Source Code</a></li>
+          <li><a class="footer-donate" href="/account/NAYLN6AV23T63J3HDC2BTMJFS5WMFXYYZDOIWI5W" rel="noopener">${heartIcon}Donations</a></li>
         </ul>
       </div>
     </div>
@@ -1872,25 +1983,63 @@ function homeHeroHTML() {
   </div></div>`;
 }
 
+// shadcn "Line Chart - Label" style: a bare line with a value label above
+// each point and a date label below — no axes, gridlines or legend, sized to
+// fit inside a home-stat card.
+function dailyTxChartHTML() {
+  const data = getDailyTxCounts(DAILY_TX_DAYS);
+  if (data.length < 2) return `<div class="daily-tx-empty">Collecting data&hellip;</div>`;
+
+  const vals = data.map(d => d.tx_count);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const range = max - min || 1;
+  const W = 280, padX = 6, plotTop = 20, plotBottom = 74, axisY = 88;
+  const stepX = (W - padX * 2) / (data.length - 1);
+  const points = data.map((d, i) => ({
+    x: padX + i * stepX,
+    y: plotBottom - ((d.tx_count - min) / range) * (plotBottom - plotTop),
+    ...d,
+  }));
+  const fmt = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+  const line = points.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const dots = points.map(p => `<circle class="daily-tx-dot" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.5"/>`).join('');
+  const valLabels = points.map(p => `<text class="daily-tx-val" x="${p.x.toFixed(1)}" y="${(p.y - 6).toFixed(1)}">${fmt.format(p.tx_count)}</text>`).join('');
+  const axisLabels = points.map(p => {
+    const [, m, d] = p.date.split('-').map(Number);
+    return `<text class="daily-tx-axis" x="${p.x.toFixed(1)}" y="${axisY}">${m}/${d}</text>`;
+  }).join('');
+  return `<svg class="daily-tx-chart" viewBox="0 0 ${W} 96" role="img" aria-label="Daily transaction count">
+    <polyline class="daily-tx-line" points="${line}"/>
+    ${dots}${valLabels}${axisLabels}
+  </svg>`;
+}
+
 function homeStatsHTML(height, avgBlockSecs) {
   const priceRaw = getCacheMeta('xem_price');
   const changeRaw = getCacheMeta('xem_change_rate');
-  let priceVal = '—';
+  let priceVal = '—', marketCapVal = '—';
   if (priceRaw != null && changeRaw != null) {
     const price = parseFloat(priceRaw);
     const changePct = parseFloat(changeRaw) * 100;
     const up = changePct >= 0;
     priceVal = `$${formatUsdPrice(price)} <span class="${up ? 'price-up' : 'price-down'}">(${up ? '+' : ''}${changePct.toFixed(2)}%)</span>`;
+    marketCapVal = `$${formatMarketCap(price)}`;
   }
-  const stats = [
+  const leftCol = [
     ['XEM PRICE', priceVal],
+    ['MARKET CAP', marketCapVal],
+  ];
+  const midCol = [
     ['LATEST BLOCK', `<a href="/block/${height}" class="hero-hl">${height}</a>`],
     ['AVG BLOCK TIME', avgBlockSecs != null ? `${avgBlockSecs.toFixed(1)}s` : '—'],
-    ['NETWORK', 'NEM Mainnet'],
   ];
-  return `<div class="home-stats">${stats.map(([label, val]) => `
-    <div class="home-stat"><div class="home-stat-label">${label}</div><div class="home-stat-val">${val}</div></div>`).join('')}
-  </div>`;
+  const renderStat = ([label, val]) => `
+    <div class="home-stat"><div class="home-stat-label">${label}</div><div class="home-stat-val">${val}</div></div>`;
+  const renderCol = stats => `<div class="home-stat-col">${stats.map(renderStat).join('')}</div>`;
+  const networkStat = `
+    <div class="home-stat home-stat-chart"><div class="home-stat-label">TXNS / DAY</div>${dailyTxChartHTML()}</div>`;
+  return `<div class="home-stats">${renderCol(leftCol)}${renderCol(midCol)}${networkStat}</div>`;
 }
 
 function homeBlocksPanelHTML(blocks) {
@@ -2958,7 +3107,7 @@ function sharedCSS() { return `
   .footer-desc { color:var(--nav-text-2); font-size:12.5px; line-height:1.6; margin:0; max-width:320px; }
   .footer-col-title { color:var(--nav-text); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin:0 0 12px; }
   .footer-col-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
-  .footer-col-list a { display:inline-flex; align-items:center; gap:8px; color:var(--nav-text-2); text-decoration:none; font-size:12.5px; }
+  .footer-col-list a { display:inline-flex; align-items:center; gap:8px; color:var(--nav-text-2); text-decoration:none; font-size:12.5px; white-space:nowrap; }
   .footer-col-list a:hover { color:var(--link); }
   .footer-col-list a svg { width:14px; height:14px; fill:currentColor; flex-shrink:0; }
   .footer-donate svg { fill:#dc3545; }
@@ -2973,7 +3122,7 @@ function sharedCSS() { return `
     .footer-col-brand { max-width:none; }
     .footer-brand { justify-content:center; }
     .footer-desc { max-width:none; margin:0 auto; }
-    .footer-col-list { align-items:center; }
+    .footer-col-list { display:grid; grid-template-columns:repeat(2, 1fr); justify-items:center; gap:10px 16px; max-width:280px; margin:0 auto; text-align:center; }
   }
 
   /* Hero */
@@ -2993,22 +3142,33 @@ function sharedCSS() { return `
   .home-search input::placeholder { color:var(--nav-text-2); }
   .home-search button { display:inline-flex; align-items:center; justify-content:center; width:50px; flex:0 0 50px; background:transparent; border:none; border-left:1px solid color-mix(in srgb, var(--nav-text) 12%, transparent); color:var(--nav-text-2); font-size:16px; cursor:pointer; }
   .home-search button:hover { color:var(--nav-text); background:color-mix(in srgb, var(--nav-text) 10%, transparent); }
-  .home-stats { display:grid; grid-template-columns:repeat(4, 1fr); gap:14px; margin:28px 0 22px; }
+  .home-stats { display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; margin:28px 0 22px; align-items:stretch; }
+  .home-stat-col { display:flex; flex-direction:column; gap:14px; }
   .home-stat { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:14px 16px; }
+  .home-stat-col .home-stat { flex:1; display:flex; flex-direction:column; justify-content:center; }
   .home-stat-label { font-size:11px; font-weight:600; letter-spacing:.05em; color:var(--muted); margin-bottom:6px; }
   .home-stat-val { font-size:17px; font-weight:600; color:var(--text); }
   .home-stat-val .price-up { color:var(--green); font-size:13px; font-weight:500; }
   .home-stat-val .price-down { color:var(--red); font-size:13px; font-weight:500; }
+  .home-stat-chart { display:flex; flex-direction:column; justify-content:center; }
+  .daily-tx-chart { display:block; width:100%; height:auto; overflow:visible; }
+  .daily-tx-chart .daily-tx-line { fill:none; stroke:var(--link); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+  .daily-tx-chart .daily-tx-dot { fill:var(--link); }
+  .daily-tx-chart .daily-tx-val { font-size:9px; font-weight:600; fill:var(--text-2); text-anchor:middle; }
+  .daily-tx-chart .daily-tx-axis { font-size:8px; fill:var(--text-4); text-anchor:middle; }
+  .daily-tx-empty { font-size:12px; color:var(--muted); padding:16px 0; }
   .home-panels { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:28px; }
   .home-panel table { min-width:0; }
   .home-panel-foot { padding:12px 20px; border-top:1px solid var(--border); background:var(--surface-3); text-align:center; }
   .home-panel-foot a { color:var(--link); font-size:13px; font-weight:600; }
   @media (max-width:900px) {
     .home-stats { grid-template-columns:repeat(2, 1fr); }
+    .home-stat-chart { grid-column:span 2; }
     .home-panels { grid-template-columns:1fr; }
   }
   @media (max-width:480px) {
     .home-stats { grid-template-columns:1fr; }
+    .home-stat-chart { grid-column:auto; }
   }
 
   .blk-nav { display:flex; gap:6px; }
