@@ -1544,7 +1544,7 @@ app.use((req, res) => {
   <h1 style="font-size:64px;font-weight:700;margin:0;opacity:.2;">404</h1>
   <p style="font-size:18px;font-weight:600;margin:0;">Page not found</p>
   <p style="color:var(--text-2);margin:0;">The page you're looking for doesn't exist.</p>
-  <a href="/" style="margin-top:8px;padding:10px 24px;background:var(--accent);color:#fff;border-radius:8px;text-decoration:none;font-weight:600;">Go Home</a>
+  <a href="/" style="margin-top:8px;padding:10px 24px;background:var(--link);color:#fff;border-radius:8px;text-decoration:none;font-weight:600;">Go Home</a>
 </div>
 </body></html>`);
 });
