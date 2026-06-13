@@ -88,6 +88,7 @@ import {
   accountsListHTML,
   accountMoreRows,
   errorFrag,
+  CSS_VERSION,
 } from "./src/html.js";
 
 // ── Express setup ─────────────────────────────────────────────────────────────
@@ -131,6 +132,7 @@ app.use((req, res, next) => {
 
 app.get("/", async (req, res) => {
   res.setHeader("Content-Type", "text/html");
+  const base = `${req.protocol}://${req.get("host")}`;
   try {
     const height = await getHeight();
     const heights = [height, height - 1, height - 2, height - 3, height - 4];
@@ -142,9 +144,11 @@ app.get("/", async (req, res) => {
         ? (blocks[0].timeStamp - blocks[blocks.length - 1].timeStamp) /
           (blocks.length - 1)
         : null;
-    res.send(homePageHTML({ height, blocks, txs, avgBlockSecs }));
+    res.send(
+      homePageHTML({ height, blocks, txs, avgBlockSecs, baseUrl: base }),
+    );
   } catch (err) {
-    res.status(503).send(homePageHTML({ error: err.message }));
+    res.status(503).send(homePageHTML({ error: err.message, baseUrl: base }));
   }
 });
 
@@ -169,6 +173,7 @@ app.get("/search", (req, res) => {
 
 // Blocks list
 app.get("/blocks", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
   res.setHeader("Content-Type", "text/html");
   res.send(
     shell(
@@ -177,6 +182,9 @@ app.get("/blocks", (req, res) => {
       "blocks-card",
       "/api/blocks?page=1&limit=25",
       `<div class="loading"><div class="spinner"></div><span>Fetching latest blocks…</span></div>`,
+      "/blocks",
+      "Browse NEM (XEM) blockchain blocks on NEMSCAN. View block heights, transactions, signers, and timestamps.",
+      `${base}/blocks`,
     ),
   );
 });
@@ -211,6 +219,7 @@ app.get("/block/:height", (req, res) => {
   if (isNaN(height) || height < 1)
     return res.status(400).send("Invalid height");
   res.setHeader("Content-Type", "text/html");
+  const base = `${req.protocol}://${req.get("host")}`;
   res.send(
     shell(
       `Block #${height} - NEMSCAN`,
@@ -218,6 +227,9 @@ app.get("/block/:height", (req, res) => {
       "block-detail",
       `/api/block/${height}`,
       `<div class="loading"><div class="spinner"></div><span>Loading block #${height}…</span></div>`,
+      "/blocks",
+      `NEM block #${height} - transactions, signer, timestamp, and details on NEMSCAN.`,
+      `${base}/block/${height}`,
     ),
   );
 });
@@ -247,6 +259,7 @@ app.get("/tx/:hash", (req, res) => {
   if (req.query.ts) qs.set("ts", req.query.ts);
   const apiUrl = `/api/tx/${hash}${qs.toString() ? "?" + qs.toString() : ""}`;
   res.setHeader("Content-Type", "text/html");
+  const base = `${req.protocol}://${req.get("host")}`;
   res.send(
     shell(
       `Transaction ${truncHash(hash)} - NEMSCAN`,
@@ -255,6 +268,8 @@ app.get("/tx/:hash", (req, res) => {
       apiUrl,
       `<div class="loading"><div class="spinner"></div><span>Loading transaction…</span></div>`,
       "/txs",
+      `NEM transaction ${truncHash(hash)} details - sender, recipient, amount, and more on NEMSCAN.`,
+      `${base}/tx/${hash}`,
     ),
   );
 });
@@ -301,8 +316,11 @@ app.get("/api/tx/:hash", async (req, res) => {
 
 // Account detail
 app.get("/account/:address", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
   res.setHeader("Content-Type", "text/html");
-  res.send(accountShell(req.params.address));
+  res.send(
+    accountShell(req.params.address, `${base}/account/${req.params.address}`),
+  );
 });
 
 app.get("/api/account/:address", async (req, res) => {
@@ -406,6 +424,7 @@ app.get("/api/account/:address/namespaces", async (req, res) => {
 
 // Transactions list
 app.get("/txs", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
   res.setHeader("Content-Type", "text/html");
   res.send(
     shell(
@@ -415,6 +434,8 @@ app.get("/txs", (req, res) => {
       "/api/txs",
       `<div class="loading"><div class="spinner"></div><span>Fetching latest transactions…</span></div>`,
       "/txs",
+      "Browse all NEM (XEM) blockchain transactions on NEMSCAN. View sender, recipient, amount, and block details.",
+      `${base}/txs`,
     ),
   );
 });
@@ -446,6 +467,7 @@ app.get("/api/txs/more", async (req, res) => {
 
 // Namespaces list
 app.get("/namespaces", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
   res.setHeader("Content-Type", "text/html");
   res.send(
     shell(
@@ -455,6 +477,8 @@ app.get("/namespaces", (req, res) => {
       "/api/namespaces",
       `<div class="loading"><div class="spinner"></div><span>Fetching namespaces…</span></div>`,
       "/namespaces",
+      "Browse all registered NEM namespaces on NEMSCAN. Explore namespace owners, mosaics, and expiry dates.",
+      `${base}/namespaces`,
     ),
   );
 });
@@ -507,6 +531,7 @@ app.get("/namespace/:fqn", (req, res) => {
   if (!NAMESPACE_FQN_RE.test(fqn))
     return res.status(400).send("Invalid namespace");
   res.setHeader("Content-Type", "text/html");
+  const base = `${req.protocol}://${req.get("host")}`;
   res.send(
     shell(
       `Namespace ${fqn} - NEMSCAN`,
@@ -515,6 +540,8 @@ app.get("/namespace/:fqn", (req, res) => {
       `/api/namespace/${encodeURIComponent(fqn)}`,
       `<div class="loading"><div class="spinner"></div><span>Loading namespace…</span></div>`,
       "/namespaces",
+      `NEM namespace "${fqn}" details - owner, sub-namespaces, mosaics, and expiry on NEMSCAN.`,
+      `${base}/namespace/${encodeURIComponent(fqn)}`,
     ),
   );
 });
@@ -561,6 +588,7 @@ app.get("/api/namespace/:fqn", async (req, res) => {
 
 // Mosaics list
 app.get("/mosaics", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
   res.setHeader("Content-Type", "text/html");
   res.send(
     shell(
@@ -570,6 +598,8 @@ app.get("/mosaics", (req, res) => {
       "/api/mosaics",
       `<div class="loading"><div class="spinner"></div><span>Fetching mosaics…</span></div>`,
       "/mosaics",
+      "Browse all NEM mosaics on NEMSCAN. Explore mosaic supply, divisibility, owners, and descriptions.",
+      `${base}/mosaics`,
     ),
   );
 });
@@ -623,6 +653,7 @@ app.get(/^\/mosaic\/(.+)$/, (req, res) => {
   const namespace = parts.slice(0, -1).join(".");
   const title = `${namespace}:${name}`;
   res.setHeader("Content-Type", "text/html");
+  const base = `${req.protocol}://${req.get("host")}`;
   res.send(
     shell(
       `Mosaic ${title} - NEMSCAN`,
@@ -631,6 +662,8 @@ app.get(/^\/mosaic\/(.+)$/, (req, res) => {
       `/api/mosaic/${rawPath}`,
       `<div class="loading"><div class="spinner"></div><span>Loading mosaic…</span></div>`,
       "/mosaics",
+      `NEM mosaic "${title}" details - supply, divisibility, creator, and properties on NEMSCAN.`,
+      `${base}/mosaic/${rawPath}`,
     ),
   );
 });
@@ -679,6 +712,7 @@ app.get(/^\/api\/mosaic\/(.+)$/, async (req, res) => {
 
 // Polls
 app.get("/polls", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
   res.setHeader("Content-Type", "text/html");
   res.send(
     shell(
@@ -688,6 +722,8 @@ app.get("/polls", (req, res) => {
       "/api/polls",
       `<div class="loading"><div class="spinner"></div><span>Loading…</span></div>`,
       "/polls",
+      "Browse NEM governance polls on NEMSCAN. View voting results, options, and participation for NEM community decisions.",
+      `${base}/polls`,
     ),
   );
 });
@@ -718,6 +754,7 @@ app.get("/api/polls/more", (req, res) => {
 
 // Supernodes
 app.get("/nodes", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
   res.setHeader("Content-Type", "text/html");
   res.send(
     shell(
@@ -727,6 +764,8 @@ app.get("/nodes", (req, res) => {
       "/api/nodes",
       `<div class="loading"><div class="spinner"></div><span>Fetching active supernodes…</span></div>`,
       "/nodes",
+      "Browse active NEM supernodes on NEMSCAN. View node hosts, versions, and network status.",
+      `${base}/nodes`,
     ),
   );
 });
@@ -744,6 +783,7 @@ app.get("/api/nodes", async (req, res) => {
 
 // Accounts (rich list)
 app.get("/accounts", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
   res.setHeader("Content-Type", "text/html");
   res.send(
     shell(
@@ -753,6 +793,8 @@ app.get("/accounts", (req, res) => {
       "/api/accounts",
       `<div class="loading"><div class="spinner"></div><span>Fetching rich list…</span></div>`,
       "/accounts",
+      "Browse top NEM (XEM) accounts by balance on NEMSCAN. Explore the NEM rich list and account details.",
+      `${base}/accounts`,
     ),
   );
 });
@@ -786,10 +828,9 @@ app.get("/api/accounts/more", async (req, res) => {
 });
 
 app.get("/robots.txt", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
   res.setHeader("Content-Type", "text/plain");
-  res.send(
-    "User-agent: *\nAllow: /\nSitemap: http://localhost:3000/sitemap.xml\n",
-  );
+  res.send(`User-agent: *\nAllow: /\nSitemap: ${base}/sitemap.xml\n`);
 });
 
 app.get("/sitemap.xml", (req, res) => {
@@ -816,7 +857,7 @@ app.use((req, res) => {
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
   <link rel="icon" type="image/png" href="/nem_logo.png">
   <title>404 - Page Not Found | NEMSCAN</title>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/style.css?${CSS_VERSION}">
 </head>
 <body>
 <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:16px;text-align:center;padding:40px 20px;">

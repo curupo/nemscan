@@ -1,3 +1,5 @@
+import { statSync } from "node:fs";
+import { join } from "node:path";
 import {
   getCacheMeta,
   getArchivedNamespacesCount,
@@ -21,6 +23,21 @@ import {
 import { nodeContext } from "./context.js";
 import { httpsNodeOptions, httpsNodeOptionsUpdatedAt } from "./cache.js";
 import { TX_TYPES, XEM_TOTAL_SUPPLY, DAILY_TX_DAYS } from "./constants.js";
+
+// ── CSS cache-busting version ───────────────────────────────────────────────────────
+
+// Read the mtime of public/style.css once at startup and format it as
+// yyyymmddHHmmss. Appended as a query string to the <link> href so that
+// browsers always re-download the file after a git pull + server restart.
+export const CSS_VERSION = (() => {
+  try {
+    const mtime = statSync(join(process.cwd(), "public/style.css")).mtime;
+    const p = (n) => String(n).padStart(2, "0");
+    return `${mtime.getFullYear()}${p(mtime.getMonth() + 1)}${p(mtime.getDate())}${p(mtime.getHours())}${p(mtime.getMinutes())}${p(mtime.getSeconds())}`;
+  } catch {
+    return "0";
+  }
+})();
 
 // ── Shared fragments ──────────────────────────────────────────────────────────
 
@@ -598,7 +615,14 @@ export function homeTxsPanelHTML(txs) {
   </div>`;
 }
 
-export function homePageHTML({ height, blocks, txs, avgBlockSecs, error }) {
+export function homePageHTML({
+  height,
+  blocks,
+  txs,
+  avgBlockSecs,
+  error,
+  baseUrl = "",
+}) {
   const main = error
     ? `<div class="error-state"><div class="error-icon">⚠</div><div>${esc(error)}</div></div>`
     : `${homeStatsHTML(height, avgBlockSecs)}
@@ -614,15 +638,17 @@ export function homePageHTML({ height, blocks, txs, avgBlockSecs, error }) {
   <link rel="apple-touch-icon" href="/nem_logo.png">
   <link rel="manifest" href="/manifest.json">
   <meta name="description" content="NEMSCAN - NEM (XEM) blockchain explorer. Browse blocks, transactions, accounts, mosaics, and namespaces on the NEM blockchain.">
+  ${baseUrl ? `<link rel="canonical" href="${baseUrl}/">` : ""}
   <meta property="og:title" content="NEMSCAN - NEM (XEM) Blockchain Explorer">
   <meta property="og:description" content="Browse blocks, transactions, accounts, mosaics, and namespaces on the NEM blockchain.">
   <meta property="og:type" content="website">
-  <meta property="og:image" content="/nem_logo.png">
+  <meta property="og:url" content="${baseUrl}/">
+  <meta property="og:image" content="${baseUrl}/nem_logo.png">
   <meta name="twitter:card" content="summary">
   ${themeInitScript()}
   <title>NEMSCAN - NEM (XEM) Blockchain Explorer</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/style.css?${CSS_VERSION}">
 </head>
 <body>
 ${navHTML("/", true)}
@@ -643,6 +669,8 @@ export function shell(
   apiUrl,
   placeholder,
   navActive = "/blocks",
+  description = "",
+  canonicalUrl = "",
 ) {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -651,10 +679,12 @@ export function shell(
   <link rel="icon" type="image/png" href="/nem_logo.png">
   <link rel="apple-touch-icon" href="/nem_logo.png">
   <link rel="manifest" href="/manifest.json">
+  ${description ? `<meta name="description" content="${esc(description)}">` : ""}
+  ${canonicalUrl ? `<link rel="canonical" href="${canonicalUrl}">` : ""}
   ${themeInitScript()}
   <title>${title}</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/style.css?${CSS_VERSION}">
 </head>
 <body>
 ${navHTML(navActive)}
@@ -669,7 +699,7 @@ ${footerHTML()}
 </body></html>`;
 }
 
-export function accountShell(address) {
+export function accountShell(address, canonicalUrl = "") {
   const shortAddr = `${address.slice(0, 6)}…${address.slice(-4)}`;
   return `<!DOCTYPE html>
 <html lang="en">
@@ -679,9 +709,11 @@ export function accountShell(address) {
   <link rel="apple-touch-icon" href="/nem_logo.png">
   <link rel="manifest" href="/manifest.json">
   ${themeInitScript()}
+  <meta name="description" content="Account ${shortAddr} on the NEM (XEM) blockchain - transactions, harvests, mosaics, and namespaces on NEMSCAN.">
+  ${canonicalUrl ? `<link rel="canonical" href="${canonicalUrl}">` : ""}
   <title>Account ${shortAddr} - NEMSCAN</title>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/style.css?${CSS_VERSION}">
 </head>
 <body>
 ${navHTML("/blocks")}
