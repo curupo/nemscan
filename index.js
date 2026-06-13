@@ -97,6 +97,7 @@ const app = express();
 const PORT = 3000;
 
 app.disable("x-powered-by");
+app.set("trust proxy", 1); // trust X-Forwarded-Proto from reverse proxy (nginx/Caddy)
 app.use(compression());
 app.use((req, res, next) => {
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
