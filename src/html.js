@@ -1700,18 +1700,35 @@ export function mosaicsListHTML(items, updatedAt, limit) {
 
 // ── Supernodes list HTML ──────────────────────────────────────────────────────
 
+const _lockIcon = `<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>`;
+
 export function renderNodeRow(n, num) {
   let host = n.endpoint,
     link = n.endpoint;
+  let httpsOpt = null;
   try {
     const u = new URL(n.endpoint);
     host = u.port ? `${u.hostname}:${u.port}` : u.hostname;
+    // Look for a verified HTTPS endpoint whose hostname matches this node.
+    httpsOpt =
+      httpsNodeOptions.find((opt) => {
+        try {
+          return new URL(opt.endpoint).hostname === u.hostname;
+        } catch {
+          return false;
+        }
+      }) ?? null;
   } catch {}
+
+  const httpsBadge = httpsOpt
+    ? ` <a href="${esc(httpsOpt.endpoint)}/node/info" class="https-badge" target="_blank" rel="noopener" title="HTTPS 接続可 (${esc(httpsOpt.host)})">${_lockIcon}</a>`
+    : "";
+
   return `<tr>
     <td class="td-num">${num}</td>
-    <td>${esc(n.name || "—")}</td>
-    <td><a href="${esc(link)}" class="mono-link" target="_blank" rel="noopener">${esc(host)}</a></td>
-    <td><span class="status-ok">● Active</span></td>
+    <td>${esc(n.name || "\u2014")}</td>
+    <td><div class="node-endpoint-cell"><a href="${esc(link)}/node/info" class="mono-link" target="_blank" rel="noopener">${esc(host)}</a>${httpsBadge}</div></td>
+    <td><span class="status-ok">\u25cf Active</span></td>
   </tr>`;
 }
 
