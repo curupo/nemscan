@@ -26,12 +26,10 @@ import {
 } from "./nemApi.js";
 import { dateKeyFromTs } from "./helpers.js";
 import {
-  NEM_NODES,
   DAILY_TX_DAYS,
   DAILY_TX_BACKFILL_CHUNK,
   ARCHIVE_PAGE_DELAY_MS,
   DEEP_REFRESH_BATCH_DELAY_MS,
-  NODE_PROBE_TIMEOUT_MS,
 } from "./constants.js";
 
 // ── Namespace cache ───────────────────────────────────────────────────────────
@@ -146,91 +144,6 @@ export async function fetchSubNamespaces(root) {
     if (cached) return cached.items;
     throw err;
   }
-}
-
-// ── Supernode / HTTPS node options ────────────────────────────────────────────
-
-// The NEM SuperNode Program (nem.io/supernode) runs its own enrollment
-// service — NIS1 nodes have no protocol-level concept of "supernode" status,
-// so we query the program's public API directly rather than a NIS node.
-const SUPERNODE_API = "https://nem.io/supernode/api";
-
-export async function getActiveSupernodes() {
-  const res = await fetch(
-    `${SUPERNODE_API}/nodes?count=100&offset=0&status=active`,
-  );
-  if (!res.ok) throw new Error(`status ${res.status}`);
-  return res.json();
-}
-
-// Connection-node picker (navbar dropdown) — restricted to active supernodes
-// that actually speak HTTPS. The supernode directory only ever registers each
-// node's plain-HTTP REST endpoint (host:7890); it never lists an "https://"
-// entry. By NIS1 convention the same host commonly answers HTTPS one port up
-// (host:7891 — exactly how our own NEM_NODES pool is configured), so we derive
-// that candidate and probe it directly rather than trusting the registry.
-// Refreshed on the same 5-minute cadence as the rest of the "live" data.
-export let httpsNodeOptions = [];
-export let httpsNodeOptionsUpdatedAt = null;
-let _refreshingHttpsNodeOptions = false;
-
-export async function probeHttpsNode(host, timeoutMs = NODE_PROBE_TIMEOUT_MS) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const res = await fetch(`https://${host}/chain/height`, {
-      signal: ctrl.signal,
-    });
-    if (!res.ok) return false;
-    const data = await res.json();
-    return Number.isFinite(data?.height);
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(t);
-  }
-}
-
-export async function refreshHttpsNodeOptions(batchSize = 12) {
-  if (_refreshingHttpsNodeOptions) return;
-  _refreshingHttpsNodeOptions = true;
-  try {
-    const nodes = await getActiveSupernodes();
-    const candidates = [];
-    for (const n of nodes) {
-      let u;
-      try {
-        u = new URL(n.endpoint);
-      } catch {
-        continue;
-      }
-      const httpsPort = u.port ? String(Number(u.port) + 1) : "443";
-      const host = `${u.hostname}:${httpsPort}`;
-      candidates.push({
-        name: n.name || u.hostname,
-        host,
-        endpoint: `https://${host}`,
-      });
-    }
-    const verified = [];
-    for (let i = 0; i < candidates.length; i += batchSize) {
-      const batch = candidates.slice(i, i + batchSize);
-      const ok = await Promise.all(batch.map((c) => probeHttpsNode(c.host)));
-      batch.forEach((c, idx) => {
-        if (ok[idx]) verified.push(c);
-      });
-    }
-    httpsNodeOptions = verified;
-    httpsNodeOptionsUpdatedAt = Date.now();
-  } catch (err) {
-    console.error("Node options refresh failed:", err.message);
-  } finally {
-    _refreshingHttpsNodeOptions = false;
-  }
-}
-
-export function findNodeOption(endpoint) {
-  return httpsNodeOptions.find((n) => n.endpoint === endpoint) || null;
 }
 
 // ── Mosaic cache ──────────────────────────────────────────────────────────────

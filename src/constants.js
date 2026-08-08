@@ -7,19 +7,6 @@ export const NEM_NODES_FALLBACK = [
   "https://hanabi.kasanetalk.net:7891",
 ];
 
-export const NEM_NODES = [
-  "https://nebuta.kasanetalk.net:7891",
-  "https://tanabata.kasanetalk.net:7891",
-  "https://sanja.kasanetalk.net:7891",
-  "https://kanda.kasanetalk.net:7891",
-  "https://gion.kasanetalk.net:7891",
-  "https://tenjin.kasanetalk.net:7891",
-  "https://yosakoi.kasanetalk.net:7891",
-  "https://yamakasa.kasanetalk.net:7891",
-  "https://eisa.kasanetalk.net:7891",
-  "https://hanabi.kasanetalk.net:7891",
-];
-
 export const NEM_EPOCH_MS = 1427587585000;
 
 // In-memory LRU cache for recently fetched blocks (avoids redundant node requests).

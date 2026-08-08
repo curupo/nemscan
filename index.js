@@ -3,10 +3,8 @@ import compression from "compression";
 
 import { nodeContext } from "./src/context.js";
 import {
-  findNodeOption,
   fetchSubNamespaces,
   fetchMosaicsForNamespace,
-  getActiveSupernodes,
   refreshNamespacesCache,
   refreshMosaicsCache,
   refreshAllMosaicsDeep,
@@ -16,11 +14,15 @@ import {
   refreshRichListCache,
   refreshLiveRichList,
   refreshPriceCache,
-  refreshHttpsNodeOptions,
   scheduleDailyTxStatsRefresh,
   liveRichList,
   liveRichListUpdatedAt,
 } from "./src/cache.js";
+import {
+  findNodeOption,
+  httpsNodeOptions,
+  refreshHttpsNodeOptions,
+} from "./src/nodePool.js";
 import {
   getHeight,
   getBlock,
@@ -771,15 +773,9 @@ app.get("/nodes", (req, res) => {
   );
 });
 
-app.get("/api/nodes", async (req, res) => {
-  try {
-    const nodes = await getActiveSupernodes();
-    res.setHeader("Content-Type", "text/html");
-    res.send(nodesListHTML(nodes));
-  } catch (err) {
-    res.status(503).setHeader("Content-Type", "text/html");
-    res.send(errorFrag(err.message, "/api/nodes", "#nodes-card"));
-  }
+app.get("/api/nodes", (req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  res.send(nodesListHTML(httpsNodeOptions));
 });
 
 // Accounts (rich list)

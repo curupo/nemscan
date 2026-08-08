@@ -21,7 +21,7 @@ import {
   decodeMsg,
 } from "./helpers.js";
 import { nodeContext } from "./context.js";
-import { httpsNodeOptions, httpsNodeOptionsUpdatedAt } from "./cache.js";
+import { httpsNodeOptions, httpsNodeOptionsUpdatedAt } from "./nodePool.js";
 import { TX_TYPES, XEM_TOTAL_SUPPLY, DAILY_TX_DAYS } from "./constants.js";
 
 // ── CSS cache-busting version ───────────────────────────────────────────────────────
