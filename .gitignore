@@ -3,3 +3,4 @@ cache.db
 cache.db-shm
 cache.db-wal
 server.log
+.superpowers/
