@@ -1,3 +1,12 @@
+// Small hardcoded safety net used only when the dynamic node pool
+// (src/nodePool.js) has no verified entries yet — cold start before the
+// first refresh completes, or a sustained nodewatch.symbol.tools outage.
+export const NEM_NODES_FALLBACK = [
+  "https://nebuta.kasanetalk.net:7891",
+  "https://tanabata.kasanetalk.net:7891",
+  "https://hanabi.kasanetalk.net:7891",
+];
+
 export const NEM_NODES = [
   "https://nebuta.kasanetalk.net:7891",
   "https://tanabata.kasanetalk.net:7891",
@@ -64,5 +73,5 @@ export const ARCHIVE_PAGE_DELAY_MS = 150;
 // Milliseconds to wait between batches during the deep mosaic refresh.
 export const DEEP_REFRESH_BATCH_DELAY_MS = 200;
 
-// Timeout for probing whether a supernode candidate speaks HTTPS.
+// Timeout for probing whether a discovered node candidate speaks HTTPS.
 export const NODE_PROBE_TIMEOUT_MS = 6000;
