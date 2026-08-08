@@ -98,11 +98,21 @@ Renaming to reflect the new semantics (was: "the SuperNode Program's enrollment 
 
 ## UI copy affected
 
-`src/html.js` `nodesListHTML()` (~line 1767-1775) currently renders a page titled "Active Supernodes" claiming data is "sourced from nem.io/supernode". This becomes inaccurate once the source is nodewatch and the set is no longer supernode-only:
+The word "supernode" appears throughout the `/nodes` page and its supporting chrome, all describing the same underlying data that's changing source and scope. Fixing only `nodesListHTML()`'s card title would leave it contradicting the page's own `<h1>` and browser tab title. Full set of copy to update, all "supernode(s)" → "node(s)":
 
-- Title "Active Supernodes" → "Active Nodes"
-- Empty state "No active supernodes found" → "No active nodes found"
-- Attribution note: link + wording updated to point at `nodewatch.symbol.tools` instead of `nem.io/supernodes`
+| File:line | Current | New |
+|---|---|---|
+| `index.js:762` (page `<title>`) | `"Supernodes - NEMSCAN"` | `"Nodes - NEMSCAN"` |
+| `index.js:766` (loading placeholder) | `"Fetching active supernodes…"` | `"Fetching active nodes…"` |
+| `index.js:768` (meta description) | `"Browse active NEM supernodes on NEMSCAN. View node hosts, versions, and network status."` | `"Browse active NEM nodes on NEMSCAN. View node hosts, versions, and network status."` |
+| `html.js:414` (`heroNodes()` `<h1>`) | `"Supernodes"` | `"Nodes"` |
+| `html.js:105` (dropdown head) | `"Connect via active HTTPS supernodes"` | `"Connect via active HTTPS nodes"` |
+| `html.js:111` (dropdown empty states) | `"No HTTPS-reachable supernodes right now"` / `"Probing active supernodes for HTTPS…"` | `"No HTTPS-reachable nodes right now"` / `"Probing active nodes for HTTPS…"` |
+| `html.js:1772` (card title) | `"Active Supernodes"` | `"Active Nodes"` |
+| `html.js:1769` (empty state) | `"No active supernodes found"` | `"No active nodes found"` |
+| `html.js:1775` (attribution note) | links/credits `nem.io/supernode` | links/credits `nodewatch.symbol.tools` (`https://nodewatch.symbol.tools`), wording updated to "crawled node list" instead of "supernode" |
+
+Route/section comments referencing "Supernode(s)" (`index.js:756`, `cache.js:151/153-154/166-167` → moved to `nodePool.js`) are updated for accuracy as part of the `nodePool.js` extraction (see Architecture section) — they described the old `nem.io` SuperNode Program semantics, which no longer apply.
 
 Footer "Resources" link to `nem.io/supernodes/` (html.js:212) is left as-is — it's a general external link, not a data-provenance claim.
 
