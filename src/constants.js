@@ -89,7 +89,7 @@ export const ARCHIVE_PAGE_DELAY_MS = 150;
 // Milliseconds to wait between batches during the deep mosaic refresh.
 export const DEEP_REFRESH_BATCH_DELAY_MS = 200;
 
-// Timeout for probing whether a discovered node candidate speaks HTTPS.
+// Timeout for probing whether a discovered node candidate answers on a given protocol.
 export const NODE_PROBE_TIMEOUT_MS = 6000;
 
 // ── Networks (mainnet / testnet) ────────────────────────────────────────────────

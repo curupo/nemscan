@@ -99,7 +99,7 @@ export function nodeSwitchHTML() {
       return `
         <button type="button" class="node-menu-item${isActive(n.endpoint)}" data-node-endpoint="${esc(n.endpoint)}" data-node-name="${esc(n.name)}" role="menuitem" onclick="selectNode(this)">
           <span class="node-menu-dot"></span>
-          <span class="node-menu-text"><span class="node-menu-name">${esc(n.name)}</span><span class="node-menu-sub">${esc(n.host)}${badge}</span></span>
+          <span class="node-menu-text"><span class="node-menu-name">${esc(n.name)}</span><span class="node-menu-sub"><span class="node-menu-sub-host">${esc(n.host)}</span>${badge}</span></span>
         </button>`;
     })
     .join("");
