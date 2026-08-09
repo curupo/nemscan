@@ -40,7 +40,7 @@ nemscan/
 │   ├── constants.js  # 定数（ノードリスト・タイムアウト値など）
 │   ├── context.js    # AsyncLocalStorage（リクエスト単位のノード選択）
 │   ├── helpers.js    # ユーティリティ（日付変換・アドレス導出・フォーマット）
-│   ├── db.js         # SQLite セットアップ・全 DB アクセス関数
+│   ├── db.js         # SQLite セットアップ・全 DB アクセス関数（mainnet/testnetで別ファイル）
 │   ├── nemApi.js     # NEM NIS への fetch（nemFetch・getBlock・getAccount 等）
 │   ├── cache.js      # バックグラウンド更新・アーカイブインポート
 │   └── html.js       # HTML 生成関数
@@ -52,6 +52,12 @@ nemscan/
 
 ## データの初期化・再同期
 
+## mainnet / testnet
+
+画面右上のドロップダウンで mainnet ⇄ testnet を切り替えられます（訪問者ごとの Cookie 設定、サーバー再起動不要）。testnet は独立した SQLite ファイル（`cache-testnet.db`）と、独立したノードプール・アドレス形式（`T` 始まり）を持ちます。
+
+XEM 価格表示・ネームスペース/モザイクの歴史アーカイブ・ポール一覧・リッチリスト(Accounts)は mainnet 専用の外部データソースに依存しているため、testnet では利用できません。
+
 ### キャッシュ DB をすべて削除して最初からやり直す
 
 ```bash
@@ -59,7 +65,7 @@ rm cache.db cache.db-shm cache.db-wal
 node index.js
 ```
 
-DB ファイルを削除して再起動すると、テーブル作成とアーカイブインポートがすべて最初から実行されます。
+DB ファイルを削除して再起動すると、テーブル作成とアーカイブインポートがすべて最初から実行されます。testnet 側をやり直す場合は `cache-testnet.db cache-testnet.db-shm cache-testnet.db-wal` を同様に削除してください。
 
 ### アーカイブを個別に再インポートする
 
