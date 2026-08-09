@@ -68,11 +68,9 @@ test("findNodeOption returns null when no node matches", async () => {
 test("getNodeOptions defaults to the current network and mainnet/testnet pools are independent", async (t) => {
   t.mock.method(global, "fetch", async (url) => {
     const u = String(url);
-    // probeNode makes a second, separate fetch call to /chain/height —
-    // answer that too, so candidates actually verify as healthy and each
-    // network's pool gets populated (a shared/buggy pool would still make
-    // this pass if we only checked that *a* refresh happened, so this test
-    // asserts the resulting pools' actual contents instead).
+    // probeNode makes a second, separate fetch call to /chain/height for
+    // both the HTTPS and HTTP candidate — answer both as healthy, so each
+    // network's pool ends up with one entry per protocol.
     if (u.includes("/chain/height")) {
       return { ok: true, json: async () => ({ height: 12345 }) };
     }
@@ -90,13 +88,17 @@ test("getNodeOptions defaults to the current network and mainnet/testnet pools a
 
   const mainnetPool = getNodeOptions("mainnet");
   const testnetPool = getNodeOptions("testnet");
-  assert.equal(mainnetPool.length, 1);
-  assert.equal(testnetPool.length, 1);
-  assert.notEqual(mainnetPool[0].endpoint, testnetPool[0].endpoint);
-  // refreshNodeOptions derives the HTTPS candidate one port up from the
-  // plain-HTTP endpoint nodewatch listed (7890 -> 7891).
+  assert.equal(mainnetPool.length, 2);
+  assert.equal(testnetPool.length, 2);
+  // refreshNodeOptions pushes the derived HTTPS candidate before the
+  // original HTTP candidate for each nodewatch entry, so with a single
+  // source node per network, pool order is deterministic here.
   assert.equal(mainnetPool[0].host, "mnode:7891");
+  assert.equal(mainnetPool[0].protocol, "https");
+  assert.equal(mainnetPool[1].host, "mnode:7890");
+  assert.equal(mainnetPool[1].protocol, "http");
   assert.equal(testnetPool[0].host, "tnode:7891");
+  assert.equal(testnetPool[1].host, "tnode:7890");
 
   networkContext.run("testnet", () => {
     const pool = getNodeOptions();
@@ -105,4 +107,65 @@ test("getNodeOptions defaults to the current network and mainnet/testnet pools a
 
   assert.ok(getNodeOptionsUpdatedAt("mainnet") !== null);
   assert.ok(getNodeOptionsUpdatedAt("testnet") !== null);
+});
+
+test("refreshNodeOptions admits only the HTTPS candidate when the HTTP endpoint fails its probe", async (t) => {
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.startsWith("https://") && u.includes("/chain/height")) {
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    if (u.startsWith("http://") && u.includes("/chain/height")) {
+      return { ok: false };
+    }
+    return {
+      ok: true,
+      json: async () => [{ endpoint: "http://onlyhttps:7890", name: "onlyhttps" }],
+    };
+  });
+  await refreshNodeOptions("mainnet");
+  const pool = getNodeOptions("mainnet");
+  assert.equal(pool.length, 1);
+  assert.equal(pool[0].protocol, "https");
+  assert.equal(pool[0].host, "onlyhttps:7891");
+});
+
+test("refreshNodeOptions admits only the HTTP candidate when the HTTPS endpoint fails its probe", async (t) => {
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.startsWith("http://") && u.includes("/chain/height")) {
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    if (u.startsWith("https://") && u.includes("/chain/height")) {
+      return { ok: false };
+    }
+    return {
+      ok: true,
+      json: async () => [{ endpoint: "http://onlyhttp:7890", name: "onlyhttp" }],
+    };
+  });
+  await refreshNodeOptions("mainnet");
+  const pool = getNodeOptions("mainnet");
+  assert.equal(pool.length, 1);
+  assert.equal(pool[0].protocol, "http");
+  assert.equal(pool[0].host, "onlyhttp:7890");
+});
+
+test("refreshNodeOptions admits both candidates when a host answers on both protocols", async (t) => {
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [{ endpoint: "http://both:7890", name: "both" }],
+    };
+  });
+  await refreshNodeOptions("mainnet");
+  const pool = getNodeOptions("mainnet");
+  assert.equal(pool.length, 2);
+  assert.deepEqual(pool.map((n) => n.protocol).sort(), ["http", "https"]);
+  assert.ok(pool.some((n) => n.protocol === "http" && n.host === "both:7890"));
+  assert.ok(pool.some((n) => n.protocol === "https" && n.host === "both:7891"));
 });

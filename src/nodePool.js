@@ -33,11 +33,13 @@ export async function getKnownNemNodes(network) {
 
 // ── Node verification ─────────────────────────────────────────────────────────
 
-// nodewatch only ever lists each node's plain-HTTP REST endpoint (host:7890);
-// it never lists an "https://" entry. By NIS1 convention the same host
-// commonly answers HTTPS one port up (host:7891 — exactly how our fallback
-// pools in constants.js are configured), so we derive that candidate and probe
-// it directly rather than trusting the registry.
+// nodewatch only ever lists each node's plain-HTTP REST endpoint (host:7890).
+// NIS1 has no protocol requirement, so that endpoint is itself one candidate
+// — and since the same host commonly also answers HTTPS one port up
+// (host:7891, exactly how our fallback pools in constants.js are
+// configured), we derive a second HTTPS candidate. Both are probed and
+// admitted independently: a host can contribute one or two pool entries
+// depending on which protocol(s) it actually answers on.
 const state = {
   mainnet: { nodeOptions: [], nodeOptionsUpdatedAt: null, refreshing: false },
   testnet: { nodeOptions: [], nodeOptionsUpdatedAt: null, refreshing: false },
@@ -86,11 +88,18 @@ export async function refreshNodeOptions(network = currentNetwork(), batchSize =
       }
       if (isPrivateHostname(u.hostname)) continue;
       const httpsPort = u.port ? String(Number(u.port) + 1) : "443";
-      const host = `${u.hostname}:${httpsPort}`;
+      const httpsHost = `${u.hostname}:${httpsPort}`;
       candidates.push({
         name: n.name || u.hostname,
-        host,
-        endpoint: `https://${host}`,
+        host: httpsHost,
+        endpoint: `https://${httpsHost}`,
+        protocol: "https",
+      });
+      candidates.push({
+        name: n.name || u.hostname,
+        host: u.host,
+        endpoint: `http://${u.host}`,
+        protocol: "http",
       });
     }
     const verified = [];
@@ -127,7 +136,8 @@ function shuffle(arr) {
 }
 
 // Returns a freshly shuffled copy of the current network's node pool: the
-// dynamic, verified pool when it has at least one entry, else that
+// dynamic, verified pool (HTTPS and HTTP entries mixed together, uniformly
+// shuffled) when it has at least one entry, else that
 // network's hardcoded fallback (cold start, or a sustained nodewatch outage
 // before any successful refresh has ever completed). Called fresh on every
 // nemFetch() so load spreads across nodes instead of always starting from the
