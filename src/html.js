@@ -21,7 +21,7 @@ import {
   decodeMsg,
 } from "./helpers.js";
 import { nodeContext, currentNetwork } from "./context.js";
-import { getHttpsNodeOptions, getHttpsNodeOptionsUpdatedAt } from "./nodePool.js";
+import { getNodeOptions, getNodeOptionsUpdatedAt } from "./nodePool.js";
 import { TX_TYPES, XEM_TOTAL_SUPPLY, DAILY_TX_DAYS, NETWORKS } from "./constants.js";
 
 // ── CSS cache-busting version ───────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ export function nodeSwitchHTML() {
   const activeEndpoint = active ? active.endpoint : "";
   const activeLabel = active ? active.name : "Auto";
   const isActive = (ep) => (ep === activeEndpoint ? " active" : "");
-  const items = [...getHttpsNodeOptions()]
+  const items = [...getNodeOptions()]
     .sort((a, b) => a.name.localeCompare(b.name))
     .map(
       (n) => `
@@ -115,7 +115,7 @@ export function nodeSwitchHTML() {
           <span class="node-menu-text"><span class="node-menu-name">Auto</span><span class="node-menu-sub">randomized node pool</span></span>
         </button>
         <div class="node-menu-sep"></div>
-        ${items || `<div class="node-menu-empty">${getHttpsNodeOptionsUpdatedAt() ? "No HTTPS-reachable nodes right now" : "Probing active nodes for HTTPS…"}</div>`}
+        ${items || `<div class="node-menu-empty">${getNodeOptionsUpdatedAt() ? "No HTTPS-reachable nodes right now" : "Probing active nodes for HTTPS…"}</div>`}
       </div>
     </div>`;
 }

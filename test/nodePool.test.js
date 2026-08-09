@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import {
   getShuffledNodePool,
   findNodeOption,
-  getHttpsNodeOptions,
-  getHttpsNodeOptionsUpdatedAt,
-  refreshHttpsNodeOptions,
+  getNodeOptions,
+  getNodeOptionsUpdatedAt,
+  refreshNodeOptions,
 } from "../src/nodePool.js";
 import {
   NEM_NODES_FALLBACK,
@@ -65,10 +65,10 @@ test("findNodeOption returns null when no node matches", async () => {
   assert.equal(findNodeOption("https://nonexistent:7891"), null);
 });
 
-test("getHttpsNodeOptions defaults to the current network and mainnet/testnet pools are independent", async (t) => {
+test("getNodeOptions defaults to the current network and mainnet/testnet pools are independent", async (t) => {
   t.mock.method(global, "fetch", async (url) => {
     const u = String(url);
-    // probeHttpsNode makes a second, separate fetch call to /chain/height —
+    // probeNode makes a second, separate fetch call to /chain/height —
     // answer that too, so candidates actually verify as healthy and each
     // network's pool gets populated (a shared/buggy pool would still make
     // this pass if we only checked that *a* refresh happened, so this test
@@ -85,24 +85,24 @@ test("getHttpsNodeOptions defaults to the current network and mainnet/testnet po
           : [{ endpoint: "http://mnode:7890", name: "mnode" }],
     };
   });
-  await refreshHttpsNodeOptions("mainnet");
-  await refreshHttpsNodeOptions("testnet");
+  await refreshNodeOptions("mainnet");
+  await refreshNodeOptions("testnet");
 
-  const mainnetPool = getHttpsNodeOptions("mainnet");
-  const testnetPool = getHttpsNodeOptions("testnet");
+  const mainnetPool = getNodeOptions("mainnet");
+  const testnetPool = getNodeOptions("testnet");
   assert.equal(mainnetPool.length, 1);
   assert.equal(testnetPool.length, 1);
   assert.notEqual(mainnetPool[0].endpoint, testnetPool[0].endpoint);
-  // refreshHttpsNodeOptions derives the HTTPS candidate one port up from the
+  // refreshNodeOptions derives the HTTPS candidate one port up from the
   // plain-HTTP endpoint nodewatch listed (7890 -> 7891).
   assert.equal(mainnetPool[0].host, "mnode:7891");
   assert.equal(testnetPool[0].host, "tnode:7891");
 
   networkContext.run("testnet", () => {
-    const pool = getHttpsNodeOptions();
+    const pool = getNodeOptions();
     assert.equal(pool[0].host, "tnode:7891");
   });
 
-  assert.ok(getHttpsNodeOptionsUpdatedAt("mainnet") !== null);
-  assert.ok(getHttpsNodeOptionsUpdatedAt("testnet") !== null);
+  assert.ok(getNodeOptionsUpdatedAt("mainnet") !== null);
+  assert.ok(getNodeOptionsUpdatedAt("testnet") !== null);
 });

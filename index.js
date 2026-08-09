@@ -20,9 +20,9 @@ import {
 } from "./src/cache.js";
 import {
   findNodeOption,
-  getHttpsNodeOptions,
-  getHttpsNodeOptionsUpdatedAt,
-  refreshHttpsNodeOptions,
+  getNodeOptions,
+  getNodeOptionsUpdatedAt,
+  refreshNodeOptions,
 } from "./src/nodePool.js";
 import { NETWORKS } from "./src/constants.js";
 import {
@@ -115,7 +115,7 @@ app.use((req, res, next) => {
 app.use(express.static("public"));
 
 // Reads the navbar's node-switch cookie and, if it names one of the currently
-// cached HTTPS node options, makes that node available to nemFetch() for the
+// cached node options, makes that node available to nemFetch() for the
 // remainder of this request via AsyncLocalStorage. Anything else (missing
 // cookie, stale/unknown endpoint) falls through to the default shuffled
 // pool — the whitelist check also keeps a forged cookie from turning this
@@ -790,7 +790,7 @@ app.get("/nodes", (req, res) => {
 
 app.get("/api/nodes", (req, res) => {
   res.setHeader("Content-Type", "text/html");
-  res.send(nodesListHTML(getHttpsNodeOptions(), getHttpsNodeOptionsUpdatedAt() !== null));
+  res.send(nodesListHTML(getNodeOptions(), getNodeOptionsUpdatedAt() !== null));
 });
 
 // Accounts (rich list)
@@ -911,7 +911,7 @@ function runForEachNetwork(fn) {
 setTimeout(() => {
   // Network-agnostic jobs: run for both mainnet and testnet.
   runForEachNetwork(() => refreshNamespacesCache().then(refreshMosaicsCache));
-  runForEachNetwork(refreshHttpsNodeOptions);
+  runForEachNetwork(refreshNodeOptions);
   NETWORK_KEYS.forEach((network) => scheduleDailyTxStatsRefresh(network));
 
   // Mainnet-only jobs: their data sources (nemtool.com, nemnodes.org,
@@ -927,7 +927,7 @@ setTimeout(() => {
   setInterval(() => runFor("mainnet", refreshRichListCache), 6 * 60 * 60 * 1000);
   setInterval(() => runFor("mainnet", refreshLiveRichList), 5 * 60 * 1000);
   setInterval(() => runFor("mainnet", refreshPriceCache), 60 * 1000);
-  setInterval(() => runForEachNetwork(refreshHttpsNodeOptions), 5 * 60 * 1000);
+  setInterval(() => runForEachNetwork(refreshNodeOptions), 5 * 60 * 1000);
   // Deep mosaic refresh: first run 2 minutes after startup to avoid congestion,
   // then every 6 hours. Covers all known namespaces and refreshes current supply.
   setTimeout(() => runForEachNetwork(refreshAllMosaicsDeep), 2 * 60 * 1000);
