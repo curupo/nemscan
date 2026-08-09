@@ -93,10 +93,10 @@ export async function refreshHttpsNodeOptions(batchSize = 12) {
     if (verified.length > 0) {
       httpsNodeOptions = verified;
     }
-    httpsNodeOptionsUpdatedAt = Date.now();
   } catch (err) {
     console.error("Node options refresh failed:", err.message);
   } finally {
+    httpsNodeOptionsUpdatedAt = Date.now();
     _refreshingHttpsNodeOptions = false;
   }
 }
