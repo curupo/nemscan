@@ -7,6 +7,7 @@ import {
   getNodeOptionsUpdatedAt,
   refreshNodeOptions,
   probeNode,
+  getAutoBestNode,
 } from "../src/nodePool.js";
 import {
   NEM_NODES_FALLBACK,
@@ -203,4 +204,109 @@ test("probeNode resolves to { ok: false, latencyMs: null } when fetch throws", a
   });
   const result = await probeNode("https://node:7891");
   assert.deepEqual(result, { ok: false, latencyMs: null });
+});
+
+test("refreshNodeOptions sets getAutoBestNode to the fastest verified candidate", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      t.mock.timers.tick(u.includes("slow") ? 300 : 50);
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [
+        { endpoint: "http://fast:7890", name: "fast" },
+        { endpoint: "http://slow:7890", name: "slow" },
+      ],
+    };
+  });
+  // batchSize=1 makes probing fully sequential, so the shared fake clock's
+  // ticks aren't interleaved across concurrent probeNode() calls.
+  await refreshNodeOptions("mainnet", 1);
+  const best = getAutoBestNode("mainnet");
+  assert.equal(best.name, "fast");
+  assert.equal(best.latencyMs, 50);
+});
+
+test("refreshNodeOptions keeps the current autoBestNode when a new candidate is only marginally faster (hysteresis)", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  let round = 1;
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      t.mock.timers.tick(u.includes("://a:") ? 100 : round === 1 ? 400 : 80);
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [
+        { endpoint: "http://a:7890", name: "a" },
+        { endpoint: "http://b:7890", name: "b" },
+      ],
+    };
+  });
+  await refreshNodeOptions("mainnet", 1);
+  assert.equal(getAutoBestNode("mainnet").name, "a"); // round 1: a=100ms, b=400ms
+
+  round = 2;
+  await refreshNodeOptions("mainnet", 1);
+  // round 2: a is still 100ms, b improved to 80ms — only 20ms faster than
+  // a's fresh measurement this round, well under the 150ms margin.
+  assert.equal(getAutoBestNode("mainnet").name, "a");
+});
+
+test("refreshNodeOptions switches autoBestNode once a candidate is faster than the margin", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  let round = 1;
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      t.mock.timers.tick(u.includes("://a:") ? 300 : round === 1 ? 1000 : 140);
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [
+        { endpoint: "http://a:7890", name: "a" },
+        { endpoint: "http://b:7890", name: "b" },
+      ],
+    };
+  });
+  await refreshNodeOptions("mainnet", 1);
+  assert.equal(getAutoBestNode("mainnet").name, "a"); // round 1: a=300ms, b=1000ms
+
+  round = 2;
+  await refreshNodeOptions("mainnet", 1);
+  // round 2: a is still 300ms, b improved to 140ms — 160ms faster than a's
+  // fresh measurement this round, over the 150ms margin.
+  assert.equal(getAutoBestNode("mainnet").name, "b");
+});
+
+test("refreshNodeOptions forces a switch when the current autoBestNode drops out of the verified pool", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  let round = 1;
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      t.mock.timers.tick(round === 1 ? 100 : 500);
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    return {
+      ok: true,
+      json: async () =>
+        round === 1
+          ? [{ endpoint: "http://a:7890", name: "a" }]
+          : [{ endpoint: "http://b:7890", name: "b" }],
+    };
+  });
+  await refreshNodeOptions("mainnet", 1);
+  assert.equal(getAutoBestNode("mainnet").name, "a");
+
+  round = 2; // "a" is no longer reported by nodewatch at all this cycle
+  await refreshNodeOptions("mainnet", 1);
+  // "b" is much slower (500ms) than "a" ever was, but "a" is gone, so the
+  // margin check doesn't apply — must switch anyway.
+  assert.equal(getAutoBestNode("mainnet").name, "b");
 });

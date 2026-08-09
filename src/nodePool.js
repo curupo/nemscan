@@ -1,4 +1,4 @@
-import { NODE_PROBE_TIMEOUT_MS, NETWORKS } from "./constants.js";
+import { NODE_PROBE_TIMEOUT_MS, AUTO_BEST_NODE_HYSTERESIS_MS, NETWORKS } from "./constants.js";
 import { currentNetwork } from "./context.js";
 
 // ── Node discovery ────────────────────────────────────────────────────────────
@@ -41,8 +41,8 @@ export async function getKnownNemNodes(network) {
 // admitted independently: a host can contribute one or two pool entries
 // depending on which protocol(s) it actually answers on.
 const state = {
-  mainnet: { nodeOptions: [], nodeOptionsUpdatedAt: null, refreshing: false },
-  testnet: { nodeOptions: [], nodeOptionsUpdatedAt: null, refreshing: false },
+  mainnet: { nodeOptions: [], nodeOptionsUpdatedAt: null, refreshing: false, autoBestNode: null },
+  testnet: { nodeOptions: [], nodeOptionsUpdatedAt: null, refreshing: false, autoBestNode: null },
 };
 
 export function getNodeOptions(network = currentNetwork()) {
@@ -51,6 +51,10 @@ export function getNodeOptions(network = currentNetwork()) {
 
 export function getNodeOptionsUpdatedAt(network = currentNetwork()) {
   return state[network].nodeOptionsUpdatedAt;
+}
+
+export function getAutoBestNode(network = currentNetwork()) {
+  return state[network].autoBestNode;
 }
 
 export async function probeNode(url, timeoutMs = NODE_PROBE_TIMEOUT_MS) {
@@ -114,6 +118,7 @@ export async function refreshNodeOptions(network = currentNetwork(), batchSize =
     }
     if (verified.length > 0) {
       s.nodeOptions = verified;
+      updateAutoBestNode(s, verified);
     }
   } catch (err) {
     console.error(`Node options refresh failed (${network}):`, err.message);
@@ -125,6 +130,26 @@ export async function refreshNodeOptions(network = currentNetwork(), batchSize =
 
 export function findNodeOption(endpoint, network = currentNetwork()) {
   return state[network].nodeOptions.find((n) => n.endpoint === endpoint) || null;
+}
+
+// Picks the fastest verified candidate and only lets it replace the current
+// autoBestNode if it's a decisive improvement (or the current one is gone
+// entirely) — see AUTO_BEST_NODE_HYSTERESIS_MS.
+function updateAutoBestNode(s, verified) {
+  const fastest = verified.reduce(
+    (best, n) => (!best || n.latencyMs < best.latencyMs ? n : best),
+    null,
+  );
+  const current = s.autoBestNode;
+  const currentFresh = current
+    ? verified.find((n) => n.endpoint === current.endpoint)
+    : null;
+  if (
+    !currentFresh ||
+    fastest.latencyMs <= currentFresh.latencyMs - AUTO_BEST_NODE_HYSTERESIS_MS
+  ) {
+    s.autoBestNode = fastest;
+  }
 }
 
 // ── Shuffled pool for nemFetch ────────────────────────────────────────────────
