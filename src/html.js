@@ -21,7 +21,7 @@ import {
   decodeMsg,
 } from "./helpers.js";
 import { nodeContext } from "./context.js";
-import { httpsNodeOptions, httpsNodeOptionsUpdatedAt } from "./cache.js";
+import { httpsNodeOptions, httpsNodeOptionsUpdatedAt } from "./nodePool.js";
 import { TX_TYPES, XEM_TOTAL_SUPPLY, DAILY_TX_DAYS } from "./constants.js";
 
 // ── CSS cache-busting version ───────────────────────────────────────────────────────
@@ -102,13 +102,13 @@ export function nodeSwitchHTML() {
         <span class="node-switch-caret">&#9662;</span>
       </button>
       <div class="node-menu" role="menu" aria-label="Connection node">
-        <div class="node-menu-head">Connect via <span class="node-menu-note">active HTTPS supernodes</span></div>
+        <div class="node-menu-head">Connect via <span class="node-menu-note">active HTTPS nodes</span></div>
         <button type="button" class="node-menu-item${isActive("")}" data-node-endpoint="" data-node-name="Auto" role="menuitem" onclick="selectNode(this)">
           <span class="node-menu-dot"></span>
-          <span class="node-menu-text"><span class="node-menu-name">Auto</span><span class="node-menu-sub">round-robin node pool</span></span>
+          <span class="node-menu-text"><span class="node-menu-name">Auto</span><span class="node-menu-sub">randomized node pool</span></span>
         </button>
         <div class="node-menu-sep"></div>
-        ${items || `<div class="node-menu-empty">${httpsNodeOptionsUpdatedAt ? "No HTTPS-reachable supernodes right now" : "Probing active supernodes for HTTPS…"}</div>`}
+        ${items || `<div class="node-menu-empty">${httpsNodeOptionsUpdatedAt ? "No HTTPS-reachable nodes right now" : "Probing active nodes for HTTPS…"}</div>`}
       </div>
     </div>`;
 }
@@ -312,7 +312,7 @@ export function themeInitScript() {
     }
   };
   // The picker only ever offers endpoints the server already validated against
-  // its live HTTPS-supernode cache, so we just hand the choice back as a cookie
+  // its live HTTPS node cache, so we just hand the choice back as a cookie
   // and reload — nemFetch() on the server then prefers that node for this browser.
   window.selectNode = function(btn) {
     var endpoint = btn.dataset.nodeEndpoint || '';
@@ -411,7 +411,7 @@ export function heroAccounts() {
 
 export function heroNodes() {
   return `<div class="hero"><div class="hero-inner">
-    <h1>Supernodes</h1>
+    <h1>Nodes</h1>
   </div></div>`;
 }
 
@@ -1730,49 +1730,29 @@ export function mosaicsListHTML(items, updatedAt, limit) {
   </table></div>`;
 }
 
-// ── Supernodes list HTML ──────────────────────────────────────────────────────
-
-const _lockIcon = `<svg viewBox="0 0 24 24" width="11" height="11" fill="currentColor" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>`;
+// ── Nodes list HTML ───────────────────────────────────────────────────────────
 
 export function renderNodeRow(n, num) {
-  let host = n.endpoint,
-    link = n.endpoint;
-  let httpsOpt = null;
-  try {
-    const u = new URL(n.endpoint);
-    host = u.port ? `${u.hostname}:${u.port}` : u.hostname;
-    // Look for a verified HTTPS endpoint whose hostname matches this node.
-    httpsOpt =
-      httpsNodeOptions.find((opt) => {
-        try {
-          return new URL(opt.endpoint).hostname === u.hostname;
-        } catch {
-          return false;
-        }
-      }) ?? null;
-  } catch {}
-
-  const httpsBadge = httpsOpt
-    ? ` <a href="${esc(httpsOpt.endpoint)}/node/info" class="https-badge" target="_blank" rel="noopener" title="HTTPS 接続可 (${esc(httpsOpt.host)})">${_lockIcon}</a>`
-    : "";
-
   return `<tr>
     <td class="td-num">${num}</td>
     <td>${esc(n.name || "\u2014")}</td>
-    <td><div class="node-endpoint-cell"><a href="${esc(link)}/node/info" class="mono-link" target="_blank" rel="noopener">${esc(host)}</a>${httpsBadge}</div></td>
+    <td><div class="node-endpoint-cell"><a href="${esc(n.endpoint)}/node/info" class="mono-link" target="_blank" rel="noopener">${esc(n.host || n.endpoint)}</a></div></td>
     <td><span class="status-ok">\u25cf Active</span></td>
   </tr>`;
 }
 
-export function nodesListHTML(nodes) {
-  if (!nodes.length)
-    return `<div class="empty-state">No active supernodes found</div>`;
+export function nodesListHTML(nodes, probed) {
+  if (!nodes.length) {
+    return probed
+      ? `<div class="empty-state">No active nodes found</div>`
+      : `<div class="loading" hx-get="/api/nodes" hx-trigger="load delay:3s" hx-target="#nodes-card" hx-swap="innerHTML"><div class="spinner"></div><span>Probing nodes…</span></div>`;
+  }
   return `
   <div class="card-head">
-    <div class="card-title">Active Supernodes <span class="live-pill"><span class="live-dot"></span>Live</span></div>
+    <div class="card-title">Active Nodes <span class="live-pill"><span class="live-dot"></span>Live</span></div>
     <span class="total-txt"><strong>${nodes.length}</strong> active</span>
   </div>
-  <p class="archive-note"><span class="archive-note-icon">&#9432;</span>The node information on this page is sourced from <a href="https://nem.io/supernodes/" target="_blank" rel="noopener">nem.io/supernode</a>.</p>
+  <p class="archive-note"><span class="archive-note-icon">&#9432;</span>The node information on this page is sourced from <a href="https://nodewatch.symbol.tools/" target="_blank" rel="noopener">nodewatch.symbol.tools</a>, a network crawler that lists all discovered NEM nodes, verified here by an HTTPS reachability check.</p>
   <div class="tbl-wrap"><table>
     <thead><tr><th>#</th><th>Name</th><th>Endpoint</th><th>Status</th></tr></thead>
     <tbody>${nodes.map((n, i) => renderNodeRow(n, i + 1)).join("")}</tbody>

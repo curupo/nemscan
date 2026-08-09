@@ -3,10 +3,8 @@ import compression from "compression";
 
 import { nodeContext } from "./src/context.js";
 import {
-  findNodeOption,
   fetchSubNamespaces,
   fetchMosaicsForNamespace,
-  getActiveSupernodes,
   refreshNamespacesCache,
   refreshMosaicsCache,
   refreshAllMosaicsDeep,
@@ -16,11 +14,16 @@ import {
   refreshRichListCache,
   refreshLiveRichList,
   refreshPriceCache,
-  refreshHttpsNodeOptions,
   scheduleDailyTxStatsRefresh,
   liveRichList,
   liveRichListUpdatedAt,
 } from "./src/cache.js";
+import {
+  findNodeOption,
+  httpsNodeOptions,
+  httpsNodeOptionsUpdatedAt,
+  refreshHttpsNodeOptions,
+} from "./src/nodePool.js";
 import {
   getHeight,
   getBlock,
@@ -109,9 +112,9 @@ app.use((req, res, next) => {
 app.use(express.static("public"));
 
 // Reads the navbar's node-switch cookie and, if it names one of the currently
-// cached HTTPS supernodes, makes that node available to nemFetch() for the
+// cached HTTPS node options, makes that node available to nemFetch() for the
 // remainder of this request via AsyncLocalStorage. Anything else (missing
-// cookie, stale/unknown endpoint) falls through to the default round-robin
+// cookie, stale/unknown endpoint) falls through to the default shuffled
 // pool — the whitelist check also keeps a forged cookie from turning this
 // into an open server-side fetch proxy.
 app.use((req, res, next) => {
@@ -753,33 +756,27 @@ app.get("/api/polls/more", (req, res) => {
   }
 });
 
-// Supernodes
+// Nodes
 app.get("/nodes", (req, res) => {
   const base = `${req.protocol}://${req.get("host")}`;
   res.setHeader("Content-Type", "text/html");
   res.send(
     shell(
-      "Supernodes - NEMSCAN",
+      "Nodes - NEMSCAN",
       heroNodes(),
       "nodes-card",
       "/api/nodes",
-      `<div class="loading"><div class="spinner"></div><span>Fetching active supernodes…</span></div>`,
+      `<div class="loading"><div class="spinner"></div><span>Fetching active nodes…</span></div>`,
       "/nodes",
-      "Browse active NEM supernodes on NEMSCAN. View node hosts, versions, and network status.",
+      "Browse active NEM nodes on NEMSCAN. View node hosts, versions, and network status.",
       `${base}/nodes`,
     ),
   );
 });
 
-app.get("/api/nodes", async (req, res) => {
-  try {
-    const nodes = await getActiveSupernodes();
-    res.setHeader("Content-Type", "text/html");
-    res.send(nodesListHTML(nodes));
-  } catch (err) {
-    res.status(503).setHeader("Content-Type", "text/html");
-    res.send(errorFrag(err.message, "/api/nodes", "#nodes-card"));
-  }
+app.get("/api/nodes", (req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  res.send(nodesListHTML(httpsNodeOptions, httpsNodeOptionsUpdatedAt !== null));
 });
 
 // Accounts (rich list)

@@ -1,11 +1,13 @@
 import { nodeContext } from "./context.js";
+import { getShuffledNodePool } from "./nodePool.js";
 import {
-  NEM_NODES,
   blockCache,
   DEFAULT_FETCH_TIMEOUT_MS,
   RACE_FETCH_TIMEOUT_MS,
   RATE_LIMIT_RETRY_MS,
   BLOCK_CACHE_MAX_SIZE,
+  RACE_MAX_NODES,
+  SEQUENTIAL_MAX_NODES,
 } from "./constants.js";
 
 // ── Core fetch ────────────────────────────────────────────────────────────────
@@ -32,7 +34,7 @@ export async function nemFetch(
   const { race: useRace, ...fetchOptions } = options;
 
   if (useRace) {
-    const attempts = NEM_NODES.map(async (node) => {
+    const attempts = getShuffledNodePool().slice(0, RACE_MAX_NODES).map(async (node) => {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
@@ -53,11 +55,14 @@ export async function nemFetch(
     }
   }
 
-  // Sequential: try preferred node first, then fall back through the pool.
+  // Sequential: try preferred node first, then fall back through a freshly
+  // shuffled pool so load spreads across nodes instead of always starting
+  // from the same one.
   const preferred = nodeContext.getStore();
+  const shuffled = getShuffledNodePool().slice(0, SEQUENTIAL_MAX_NODES);
   const pool = preferred
-    ? [preferred.endpoint, ...NEM_NODES.filter((n) => n !== preferred.endpoint)]
-    : NEM_NODES;
+    ? [preferred.endpoint, ...shuffled.filter((n) => n !== preferred.endpoint)]
+    : shuffled;
   for (const node of pool) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const ctrl = new AbortController();
