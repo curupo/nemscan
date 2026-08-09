@@ -4,6 +4,7 @@ import {
   getShuffledNodePool,
   findNodeOption,
   getHttpsNodeOptions,
+  getHttpsNodeOptionsUpdatedAt,
   refreshHttpsNodeOptions,
 } from "../src/nodePool.js";
 import {
@@ -66,7 +67,16 @@ test("findNodeOption returns null when no node matches", async () => {
 
 test("getHttpsNodeOptions defaults to the current network and mainnet/testnet pools are independent", async (t) => {
   t.mock.method(global, "fetch", async (url) => {
-    const isTestnet = String(url).includes("/testnet/");
+    const u = String(url);
+    // probeHttpsNode makes a second, separate fetch call to /chain/height —
+    // answer that too, so candidates actually verify as healthy and each
+    // network's pool gets populated (a shared/buggy pool would still make
+    // this pass if we only checked that *a* refresh happened, so this test
+    // asserts the resulting pools' actual contents instead).
+    if (u.includes("/chain/height")) {
+      return { ok: true, json: async () => ({ height: 12345 }) };
+    }
+    const isTestnet = u.includes("/testnet/");
     return {
       ok: true,
       json: async () =>
@@ -75,17 +85,24 @@ test("getHttpsNodeOptions defaults to the current network and mainnet/testnet po
           : [{ endpoint: "http://mnode:7890", name: "mnode" }],
     };
   });
-  // probeHttpsNode makes a second, separate fetch call (to /chain/height) —
-  // the same mock above answers `ok: true` with a JSON body that has no
-  // `height`, which probeHttpsNode treats as unreachable. That's fine here:
-  // this test only checks that refreshHttpsNodeOptions() resolves the right
-  // *source* URL per network, not that verification succeeds.
   await refreshHttpsNodeOptions("mainnet");
   await refreshHttpsNodeOptions("testnet");
-  // Neither candidate probed as healthy (no `height` in the mocked probe
-  // response), so both pools stay empty — but each refresh must have hit its
-  // own NODE_SOURCE_API, which we verify indirectly via getHttpsNodeOptionsUpdatedAt.
-  const { getHttpsNodeOptionsUpdatedAt } = await import("../src/nodePool.js");
+
+  const mainnetPool = getHttpsNodeOptions("mainnet");
+  const testnetPool = getHttpsNodeOptions("testnet");
+  assert.equal(mainnetPool.length, 1);
+  assert.equal(testnetPool.length, 1);
+  assert.notEqual(mainnetPool[0].endpoint, testnetPool[0].endpoint);
+  // refreshHttpsNodeOptions derives the HTTPS candidate one port up from the
+  // plain-HTTP endpoint nodewatch listed (7890 -> 7891).
+  assert.equal(mainnetPool[0].host, "mnode:7891");
+  assert.equal(testnetPool[0].host, "tnode:7891");
+
+  networkContext.run("testnet", () => {
+    const pool = getHttpsNodeOptions();
+    assert.equal(pool[0].host, "tnode:7891");
+  });
+
   assert.ok(getHttpsNodeOptionsUpdatedAt("mainnet") !== null);
   assert.ok(getHttpsNodeOptionsUpdatedAt("testnet") !== null);
 });
