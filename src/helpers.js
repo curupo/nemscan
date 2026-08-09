@@ -47,7 +47,8 @@ function _b32(buf) {
 
 export function pubKeyToAddress(hex, net = 0x68) {
   if (!hex) return null;
-  if (_addrCache.has(hex)) return _addrCache.get(hex);
+  const cacheKey = `${net}:${hex}`;
+  if (_addrCache.has(cacheKey)) return _addrCache.get(cacheKey);
   const s1 = keccak_256(Buffer.from(hex, "hex"));
   const s2 = ripemd160(s1);
   const s3 = new Uint8Array(21);
@@ -58,7 +59,7 @@ export function pubKeyToAddress(hex, net = 0x68) {
   raw.set(s3);
   raw.set(cs.subarray(0, 4), 21);
   const addr = _b32(raw);
-  _addrCache.set(hex, addr);
+  _addrCache.set(cacheKey, addr);
   return addr;
 }
 

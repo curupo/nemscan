@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getTxsFromBlocks } from "../src/nemApi.js";
+import { getTxsFromBlocks, getBlock } from "../src/nemApi.js";
 import { MAX_BLOCK_SCAN_DEPTH, MAX_BLOCK_SCAN_MS } from "../src/constants.js";
+import { networkContext } from "../src/context.js";
 
 // Builds a mock global.fetch that answers POST /block/at/public with a
 // synthetic block for whatever height was requested. `hasTx(height)`
@@ -67,4 +68,40 @@ test("getTxsFromBlocks still returns exactly `limit` items when density is high 
 
   assert.equal(items.length, 5);
   assert.equal(nextFromBlock, fromHeight - 5);
+});
+
+test("getBlock caches mainnet and testnet separately for the same height (no cross-network collision)", async (t) => {
+  // Both chains number blocks from 1, so the same height is valid on both
+  // networks. Each network's fetch returns a distinguishable payload so we
+  // can tell whether the cache served the wrong network's data.
+  let calls = 0;
+  t.mock.method(global, "fetch", async (url, opts) => {
+    calls++;
+    const { height } = JSON.parse(opts.body);
+    const network = calls === 1 ? "mainnet" : "testnet";
+    return {
+      ok: true,
+      json: async () => ({
+        timeStamp: 0,
+        transactions: [],
+        network,
+        height,
+      }),
+    };
+  });
+
+  const height = 750_000;
+  const mainnetBlock = await networkContext.run("mainnet", () => getBlock(height));
+  const testnetBlock = await networkContext.run("testnet", () => getBlock(height));
+
+  assert.equal(calls, 2, "expected a separate fetch per network for the same height");
+  assert.notEqual(mainnetBlock.network, testnetBlock.network);
+  assert.equal(mainnetBlock.network, "mainnet");
+  assert.equal(testnetBlock.network, "testnet");
+
+  // Re-fetching the same height under the same network context should now
+  // hit the cache rather than issuing a third fetch call.
+  const mainnetAgain = await networkContext.run("mainnet", () => getBlock(height));
+  assert.equal(calls, 2, "expected the second mainnet call to be served from cache");
+  assert.deepEqual(mainnetAgain, mainnetBlock);
 });

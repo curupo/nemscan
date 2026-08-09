@@ -1,5 +1,5 @@
 import {
-  db,
+  getDb,
   getCachedNamespaces,
   getArchivedNamespacesCount,
   getArchivedMosaicsCount,
@@ -31,13 +31,15 @@ import {
   ARCHIVE_PAGE_DELAY_MS,
   DEEP_REFRESH_BATCH_DELAY_MS,
 } from "./constants.js";
+import { currentNetwork, networkContext } from "./context.js";
 
 // ── Namespace cache ───────────────────────────────────────────────────────────
 
-let _refreshingNamespaces = false;
+const _refreshingNamespaces = { mainnet: false, testnet: false };
 export async function refreshNamespacesCache() {
-  if (_refreshingNamespaces) return;
-  _refreshingNamespaces = true;
+  const network = currentNetwork();
+  if (_refreshingNamespaces[network]) return;
+  _refreshingNamespaces[network] = true;
   try {
     const data = await fetchNamespacesFromNode();
     for (const item of data.data || []) {
@@ -50,9 +52,9 @@ export async function refreshNamespacesCache() {
     }
     setCacheMeta("namespaces_updated_at", Date.now());
   } catch (err) {
-    console.error("Namespace cache refresh failed:", err.message);
+    console.error(`Namespace cache refresh failed (${network}):`, err.message);
   } finally {
-    _refreshingNamespaces = false;
+    _refreshingNamespaces[network] = false;
   }
 }
 
@@ -158,10 +160,11 @@ export async function fetchMosaicsForNamespace(fqn) {
   );
 }
 
-let _refreshingMosaics = false;
+const _refreshingMosaics = { mainnet: false, testnet: false };
 export async function refreshMosaicsCache() {
-  if (_refreshingMosaics) return;
-  _refreshingMosaics = true;
+  const network = currentNetwork();
+  if (_refreshingMosaics[network]) return;
+  _refreshingMosaics[network] = true;
   try {
     const namespaces = getCachedNamespaces(1000, 0);
     for (const ns of namespaces) {
@@ -190,24 +193,26 @@ export async function refreshMosaicsCache() {
     }
     setCacheMeta("mosaics_updated_at", Date.now());
   } catch (err) {
-    console.error("Mosaic cache refresh failed:", err.message);
+    console.error(`Mosaic cache refresh failed (${network}):`, err.message);
   } finally {
-    _refreshingMosaics = false;
+    _refreshingMosaics[network] = false;
   }
 }
 
 // Full deep mosaic refresh: scans every known namespace (live + archive) in
 // parallel batches, updating supply and other live fields. Runs every 6 hours.
-let _refreshingMosaicsDeep = false;
+const _refreshingMosaicsDeep = { mainnet: false, testnet: false };
 export async function refreshAllMosaicsDeep() {
-  if (_refreshingMosaicsDeep) return;
-  _refreshingMosaicsDeep = true;
+  const network = currentNetwork();
+  if (_refreshingMosaicsDeep[network]) return;
+  _refreshingMosaicsDeep[network] = true;
   try {
     // Union of all known namespace FQNs: live + archive namespaces + namespaces
     // that have mosaic records in the archive but may not appear in the namespace list.
     const nsSet = new Set();
     getNamespacesWithArchive(10000, 0).forEach((ns) => nsSet.add(ns.fqn));
-    db.prepare("SELECT DISTINCT namespace FROM mosaics_archive")
+    getDb()
+      .prepare("SELECT DISTINCT namespace FROM mosaics_archive")
       .all()
       .forEach((r) => nsSet.add(r.namespace));
     const namespaces = [...nsSet];
@@ -249,9 +254,9 @@ export async function refreshAllMosaicsDeep() {
       `Deep mosaic refresh complete: ${updated} mosaics across ${namespaces.length} namespaces`,
     );
   } catch (err) {
-    console.error("Deep mosaic refresh failed:", err.message);
+    console.error(`Deep mosaic refresh failed (${network}):`, err.message);
   } finally {
-    _refreshingMosaicsDeep = false;
+    _refreshingMosaicsDeep[network] = false;
   }
 }
 
@@ -268,13 +273,13 @@ const NEMTOOL_MOSAIC_LIST_URL =
 export async function importMosaicArchive() {
   if (getCacheMeta("mosaics_archive_imported")) {
     // Re-import if height data is missing (schema upgrade from older DB).
-    const hasHeight = db
+    const hasHeight = getDb()
       .prepare(
         "SELECT COUNT(*) AS c FROM mosaics_archive WHERE height IS NOT NULL",
       )
       .get().c;
     if (hasHeight) return;
-    db.exec("DELETE FROM cache_meta WHERE key = 'mosaics_archive_imported'");
+    getDb().exec("DELETE FROM cache_meta WHERE key = 'mosaics_archive_imported'");
   }
   let cursor = null;
   let imported = 0;
@@ -519,58 +524,63 @@ export async function scanBlockHeightsForDailyTx(heights) {
   }
 }
 
-let _refreshingDailyTxStats = false;
-export async function refreshDailyTxStats() {
-  if (_refreshingDailyTxStats) return;
-  _refreshingDailyTxStats = true;
+const _refreshingDailyTxStats = { mainnet: false, testnet: false };
+export async function refreshDailyTxStats(network) {
+  if (_refreshingDailyTxStats[network]) return;
+  _refreshingDailyTxStats[network] = true;
   try {
-    const height = await getHeight();
-    let maxH = parseInt(getCacheMeta("daily_tx_scan_max_height"));
-    let minH = parseInt(getCacheMeta("daily_tx_scan_min_height"));
-    if (!Number.isFinite(maxH)) {
-      maxH = height - 1;
-      minH = height;
-    }
-
-    if (height > maxH) {
-      const heights = [];
-      for (let h = maxH + 1; h <= height; h++) heights.push(h);
-      await scanBlockHeightsForDailyTx(heights);
-      maxH = height;
-      setCacheMeta("daily_tx_scan_max_height", maxH);
-    }
-
-    if (!getCacheMeta("daily_tx_backfill_done")) {
-      const cutoff = new Date(Date.now() - (DAILY_TX_DAYS - 1) * 86400000)
-        .toISOString()
-        .slice(0, 10);
-      const oldest = getOldestDailyTxDate();
-      if ((oldest && oldest <= cutoff) || minH <= 1) {
-        setCacheMeta("daily_tx_backfill_done", "1");
-      } else {
-        const to = Math.max(1, minH - DAILY_TX_BACKFILL_CHUNK);
-        const heights = [];
-        for (let h = minH - 1; h >= to; h--) heights.push(h);
-        await scanBlockHeightsForDailyTx(heights);
-        minH = to;
-        setCacheMeta("daily_tx_scan_min_height", minH);
+    await networkContext.run(network, async () => {
+      const height = await getHeight();
+      let maxH = parseInt(getCacheMeta("daily_tx_scan_max_height"));
+      let minH = parseInt(getCacheMeta("daily_tx_scan_min_height"));
+      if (!Number.isFinite(maxH)) {
+        maxH = height - 1;
+        minH = height;
       }
-    }
+
+      if (height > maxH) {
+        const heights = [];
+        for (let h = maxH + 1; h <= height; h++) heights.push(h);
+        await scanBlockHeightsForDailyTx(heights);
+        maxH = height;
+        setCacheMeta("daily_tx_scan_max_height", maxH);
+      }
+
+      if (!getCacheMeta("daily_tx_backfill_done")) {
+        const cutoff = new Date(Date.now() - (DAILY_TX_DAYS - 1) * 86400000)
+          .toISOString()
+          .slice(0, 10);
+        const oldest = getOldestDailyTxDate();
+        if ((oldest && oldest <= cutoff) || minH <= 1) {
+          setCacheMeta("daily_tx_backfill_done", "1");
+        } else {
+          const to = Math.max(1, minH - DAILY_TX_BACKFILL_CHUNK);
+          const heights = [];
+          for (let h = minH - 1; h >= to; h--) heights.push(h);
+          await scanBlockHeightsForDailyTx(heights);
+          minH = to;
+          setCacheMeta("daily_tx_scan_min_height", minH);
+        }
+      }
+    });
   } catch (err) {
-    console.error("Daily tx stats refresh failed:", err.message);
+    console.error(`Daily tx stats refresh failed (${network}):`, err.message);
   } finally {
-    _refreshingDailyTxStats = false;
+    _refreshingDailyTxStats[network] = false;
   }
 }
 
 // Self-rescheduling rather than setInterval: backfill runs in quick
 // succession (every 5s) until DAILY_TX_DAYS of history is covered, then
-// settles into an infrequent catch-up poll (every 5min).
-export function scheduleDailyTxStatsRefresh() {
-  refreshDailyTxStats().finally(() => {
-    const delay = getCacheMeta("daily_tx_backfill_done")
+// settles into an infrequent catch-up poll (every 5min). Takes `network`
+// explicitly and passes it through its own recursive setTimeout call.
+export function scheduleDailyTxStatsRefresh(network) {
+  refreshDailyTxStats(network).finally(() => {
+    const delay = networkContext.run(network, () =>
+      getCacheMeta("daily_tx_backfill_done"),
+    )
       ? 5 * 60 * 1000
       : 5 * 1000;
-    setTimeout(scheduleDailyTxStatsRefresh, delay);
+    setTimeout(() => scheduleDailyTxStatsRefresh(network), delay);
   });
 }
