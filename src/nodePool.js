@@ -54,17 +54,19 @@ export function getNodeOptionsUpdatedAt(network = currentNetwork()) {
 }
 
 export async function probeNode(url, timeoutMs = NODE_PROBE_TIMEOUT_MS) {
+  const startedAt = Date.now();
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(`${url}/chain/height`, {
       signal: ctrl.signal,
     });
-    if (!res.ok) return false;
+    if (!res.ok) return { ok: false, latencyMs: null };
     const data = await res.json();
-    return Number.isFinite(data?.height);
+    const ok = Number.isFinite(data?.height);
+    return { ok, latencyMs: ok ? Date.now() - startedAt : null };
   } catch {
-    return false;
+    return { ok: false, latencyMs: null };
   } finally {
     clearTimeout(t);
   }
@@ -105,9 +107,9 @@ export async function refreshNodeOptions(network = currentNetwork(), batchSize =
     const verified = [];
     for (let i = 0; i < candidates.length; i += batchSize) {
       const batch = candidates.slice(i, i + batchSize);
-      const ok = await Promise.all(batch.map((c) => probeNode(c.endpoint)));
+      const results = await Promise.all(batch.map((c) => probeNode(c.endpoint)));
       batch.forEach((c, idx) => {
-        if (ok[idx]) verified.push(c);
+        if (results[idx].ok) verified.push({ ...c, latencyMs: results[idx].latencyMs });
       });
     }
     if (verified.length > 0) {

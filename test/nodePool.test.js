@@ -6,6 +6,7 @@ import {
   getNodeOptions,
   getNodeOptionsUpdatedAt,
   refreshNodeOptions,
+  probeNode,
 } from "../src/nodePool.js";
 import {
   NEM_NODES_FALLBACK,
@@ -168,4 +169,38 @@ test("refreshNodeOptions admits both candidates when a host answers on both prot
   assert.deepEqual(pool.map((n) => n.protocol).sort(), ["http", "https"]);
   assert.ok(pool.some((n) => n.protocol === "http" && n.host === "both:7890"));
   assert.ok(pool.some((n) => n.protocol === "https" && n.host === "both:7891"));
+});
+
+test("probeNode resolves to { ok: true, latencyMs } measuring elapsed time on success", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  t.mock.method(global, "fetch", async () => {
+    t.mock.timers.tick(42);
+    return { ok: true, json: async () => ({ height: 1 }) };
+  });
+  const result = await probeNode("https://node:7891");
+  assert.equal(result.ok, true);
+  assert.equal(result.latencyMs, 42);
+});
+
+test("probeNode resolves to { ok: false, latencyMs: null } when the response is not ok", async (t) => {
+  t.mock.method(global, "fetch", async () => ({ ok: false }));
+  const result = await probeNode("https://node:7891");
+  assert.deepEqual(result, { ok: false, latencyMs: null });
+});
+
+test("probeNode resolves to { ok: false, latencyMs: null } when the height field isn't finite", async (t) => {
+  t.mock.method(global, "fetch", async () => ({
+    ok: true,
+    json: async () => ({ height: "not a number" }),
+  }));
+  const result = await probeNode("https://node:7891");
+  assert.deepEqual(result, { ok: false, latencyMs: null });
+});
+
+test("probeNode resolves to { ok: false, latencyMs: null } when fetch throws", async (t) => {
+  t.mock.method(global, "fetch", async () => {
+    throw new Error("network error");
+  });
+  const result = await probeNode("https://node:7891");
+  assert.deepEqual(result, { ok: false, latencyMs: null });
 });
