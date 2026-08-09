@@ -6,6 +6,8 @@ import {
   RACE_FETCH_TIMEOUT_MS,
   RATE_LIMIT_RETRY_MS,
   BLOCK_CACHE_MAX_SIZE,
+  RACE_MAX_NODES,
+  SEQUENTIAL_MAX_NODES,
 } from "./constants.js";
 
 // ── Core fetch ────────────────────────────────────────────────────────────────
@@ -32,7 +34,7 @@ export async function nemFetch(
   const { race: useRace, ...fetchOptions } = options;
 
   if (useRace) {
-    const attempts = getShuffledNodePool().map(async (node) => {
+    const attempts = getShuffledNodePool().slice(0, RACE_MAX_NODES).map(async (node) => {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
@@ -57,7 +59,7 @@ export async function nemFetch(
   // shuffled pool so load spreads across nodes instead of always starting
   // from the same one.
   const preferred = nodeContext.getStore();
-  const shuffled = getShuffledNodePool();
+  const shuffled = getShuffledNodePool().slice(0, SEQUENTIAL_MAX_NODES);
   const pool = preferred
     ? [preferred.endpoint, ...shuffled.filter((n) => n !== preferred.endpoint)]
     : shuffled;

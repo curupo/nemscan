@@ -8,6 +8,22 @@ import { NODE_PROBE_TIMEOUT_MS, NEM_NODES_FALLBACK } from "./constants.js";
 // third-party directory rather than a NIS node.
 const NODE_SOURCE_API = "https://nodewatch.symbol.tools/api/nem/nodes";
 
+const PRIVATE_HOSTNAME_PATTERNS = [
+  /^localhost$/i,
+  /^127\./,
+  /^10\./,
+  /^192\.168\./,
+  /^172\.(1[6-9]|2\d|3[01])\./,
+  /^169\.254\./,
+  /^0\.0\.0\.0$/,
+  /^::1$/,
+  /^\[::1\]$/,
+];
+
+function isPrivateHostname(hostname) {
+  return PRIVATE_HOSTNAME_PATTERNS.some((re) => re.test(hostname));
+}
+
 export async function getKnownNemNodes() {
   const res = await fetch(NODE_SOURCE_API);
   if (!res.ok) throw new Error(`status ${res.status}`);
@@ -57,6 +73,7 @@ export async function refreshHttpsNodeOptions(batchSize = 12) {
       } catch {
         continue;
       }
+      if (isPrivateHostname(u.hostname)) continue;
       const httpsPort = u.port ? String(Number(u.port) + 1) : "443";
       const host = `${u.hostname}:${httpsPort}`;
       candidates.push({
@@ -73,7 +90,9 @@ export async function refreshHttpsNodeOptions(batchSize = 12) {
         if (ok[idx]) verified.push(c);
       });
     }
-    httpsNodeOptions = verified;
+    if (verified.length > 0) {
+      httpsNodeOptions = verified;
+    }
     httpsNodeOptionsUpdatedAt = Date.now();
   } catch (err) {
     console.error("Node options refresh failed:", err.message);

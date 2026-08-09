@@ -45,6 +45,16 @@ export const RACE_FETCH_TIMEOUT_MS = 20000;
 // How long to back off after receiving a 429 (Too Many Requests) from a node.
 export const RATE_LIMIT_RETRY_MS = 1500;
 
+// Cap on how many pool candidates a single nemFetch() call will try. The
+// dynamic pool (src/nodePool.js) can have up to ~100 verified nodes — without
+// a cap, race mode would fan out to all of them per call (multiplying load
+// on the very endpoints this feature exists to protect) and a total-pool
+// outage in sequential mode would take proportionally longer to report as
+// failed. Both paths shuffle before slicing, so repeated calls still spread
+// across the whole pool over time — just fewer nodes per individual call.
+export const RACE_MAX_NODES = 5;
+export const SEQUENTIAL_MAX_NODES = 8;
+
 // ── Block cache ───────────────────────────────────────────────────────────────
 
 // Maximum number of blocks kept in the in-process LRU cache before eviction.

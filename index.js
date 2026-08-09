@@ -21,6 +21,7 @@ import {
 import {
   findNodeOption,
   httpsNodeOptions,
+  httpsNodeOptionsUpdatedAt,
   refreshHttpsNodeOptions,
 } from "./src/nodePool.js";
 import {
@@ -775,7 +776,7 @@ app.get("/nodes", (req, res) => {
 
 app.get("/api/nodes", (req, res) => {
   res.setHeader("Content-Type", "text/html");
-  res.send(nodesListHTML(httpsNodeOptions));
+  res.send(nodesListHTML(httpsNodeOptions, httpsNodeOptionsUpdatedAt !== null));
 });
 
 // Accounts (rich list)
