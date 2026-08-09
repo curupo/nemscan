@@ -1,12 +1,13 @@
-import { NODE_PROBE_TIMEOUT_MS, NEM_NODES_FALLBACK } from "./constants.js";
+import { NODE_PROBE_TIMEOUT_MS, NETWORKS } from "./constants.js";
+import { currentNetwork } from "./context.js";
 
 // ── Node discovery ────────────────────────────────────────────────────────────
 
 // nodewatch.symbol.tools crawls the NEM network and publishes every node it
 // discovers — not only nodes enrolled in any program. NIS1 nodes have no
 // protocol-level concept of "supernode" status, so we query this
-// third-party directory rather than a NIS node.
-const NODE_SOURCE_API = "https://nodewatch.symbol.tools/api/nem/nodes";
+// third-party directory rather than a NIS node. It publishes a separate feed
+// per network (NETWORKS.mainnet.nodeSourceApi / NETWORKS.testnet.nodeSourceApi).
 
 const PRIVATE_HOSTNAME_PATTERNS = [
   /^localhost$/i,
@@ -24,8 +25,8 @@ function isPrivateHostname(hostname) {
   return PRIVATE_HOSTNAME_PATTERNS.some((re) => re.test(hostname));
 }
 
-export async function getKnownNemNodes() {
-  const res = await fetch(NODE_SOURCE_API);
+export async function getKnownNemNodes(network) {
+  const res = await fetch(NETWORKS[network].nodeSourceApi);
   if (!res.ok) throw new Error(`status ${res.status}`);
   return res.json();
 }
@@ -35,11 +36,20 @@ export async function getKnownNemNodes() {
 // nodewatch only ever lists each node's plain-HTTP REST endpoint (host:7890);
 // it never lists an "https://" entry. By NIS1 convention the same host
 // commonly answers HTTPS one port up (host:7891 — exactly how our fallback
-// pool in constants.js is configured), so we derive that candidate and probe
+// pools in constants.js are configured), so we derive that candidate and probe
 // it directly rather than trusting the registry.
-export let httpsNodeOptions = [];
-export let httpsNodeOptionsUpdatedAt = null;
-let _refreshingHttpsNodeOptions = false;
+const state = {
+  mainnet: { httpsNodeOptions: [], httpsNodeOptionsUpdatedAt: null, refreshing: false },
+  testnet: { httpsNodeOptions: [], httpsNodeOptionsUpdatedAt: null, refreshing: false },
+};
+
+export function getHttpsNodeOptions(network = currentNetwork()) {
+  return state[network].httpsNodeOptions;
+}
+
+export function getHttpsNodeOptionsUpdatedAt(network = currentNetwork()) {
+  return state[network].httpsNodeOptionsUpdatedAt;
+}
 
 export async function probeHttpsNode(host, timeoutMs = NODE_PROBE_TIMEOUT_MS) {
   const ctrl = new AbortController();
@@ -59,12 +69,13 @@ export async function probeHttpsNode(host, timeoutMs = NODE_PROBE_TIMEOUT_MS) {
 }
 
 // Refreshed on the same 5-minute cadence as the rest of the "live" data
-// (see index.js's setInterval calls).
-export async function refreshHttpsNodeOptions(batchSize = 12) {
-  if (_refreshingHttpsNodeOptions) return;
-  _refreshingHttpsNodeOptions = true;
+// (see index.js's setInterval calls) — once per network.
+export async function refreshHttpsNodeOptions(network = currentNetwork(), batchSize = 12) {
+  const s = state[network];
+  if (s.refreshing) return;
+  s.refreshing = true;
   try {
-    const nodes = await getKnownNemNodes();
+    const nodes = await getKnownNemNodes(network);
     const candidates = [];
     for (const n of nodes) {
       let u;
@@ -91,18 +102,18 @@ export async function refreshHttpsNodeOptions(batchSize = 12) {
       });
     }
     if (verified.length > 0) {
-      httpsNodeOptions = verified;
+      s.httpsNodeOptions = verified;
     }
   } catch (err) {
-    console.error("Node options refresh failed:", err.message);
+    console.error(`Node options refresh failed (${network}):`, err.message);
   } finally {
-    httpsNodeOptionsUpdatedAt = Date.now();
-    _refreshingHttpsNodeOptions = false;
+    s.httpsNodeOptionsUpdatedAt = Date.now();
+    s.refreshing = false;
   }
 }
 
-export function findNodeOption(endpoint) {
-  return httpsNodeOptions.find((n) => n.endpoint === endpoint) || null;
+export function findNodeOption(endpoint, network = currentNetwork()) {
+  return state[network].httpsNodeOptions.find((n) => n.endpoint === endpoint) || null;
 }
 
 // ── Shuffled pool for nemFetch ────────────────────────────────────────────────
@@ -115,16 +126,20 @@ function shuffle(arr) {
   return arr;
 }
 
-// Returns a freshly shuffled copy of the current node pool: the dynamic,
-// HTTPS-verified pool when it has at least one entry, else the hardcoded
-// fallback (cold start, or a sustained nodewatch outage before any
-// successful refresh has ever completed). Called fresh on every nemFetch()
-// so load spreads across nodes instead of always starting from the same one.
+// Returns a freshly shuffled copy of the current network's node pool: the
+// dynamic, HTTPS-verified pool when it has at least one entry, else that
+// network's hardcoded fallback (cold start, or a sustained nodewatch outage
+// before any successful refresh has ever completed). Called fresh on every
+// nemFetch() so load spreads across nodes instead of always starting from the
+// same one.
 //
-// `nodes` defaults to the live httpsNodeOptions; tests pass an explicit
-// array instead of reaching into this module's internal state.
-export function getShuffledNodePool(nodes = httpsNodeOptions) {
+// `nodes` defaults to the live pool for the current network; tests pass an
+// explicit array instead of reaching into this module's internal state.
+export function getShuffledNodePool(
+  nodes = getHttpsNodeOptions(),
+  network = currentNetwork(),
+) {
   const base =
-    nodes.length > 0 ? nodes.map((n) => n.endpoint) : NEM_NODES_FALLBACK;
+    nodes.length > 0 ? nodes.map((n) => n.endpoint) : NETWORKS[network].fallbackNodes;
   return shuffle([...base]);
 }
