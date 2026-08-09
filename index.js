@@ -1,7 +1,7 @@
 import express from "express";
 import compression from "compression";
 
-import { nodeContext } from "./src/context.js";
+import { nodeContext, networkContext, currentNetwork } from "./src/context.js";
 import {
   fetchSubNamespaces,
   fetchMosaicsForNamespace,
@@ -20,10 +20,11 @@ import {
 } from "./src/cache.js";
 import {
   findNodeOption,
-  httpsNodeOptions,
-  httpsNodeOptionsUpdatedAt,
+  getHttpsNodeOptions,
+  getHttpsNodeOptionsUpdatedAt,
   refreshHttpsNodeOptions,
 } from "./src/nodePool.js";
+import { NETWORKS } from "./src/constants.js";
 import {
   getHeight,
   getBlock,
@@ -90,6 +91,7 @@ import {
   nodesListHTML,
   accountsListHTML,
   accountMoreRows,
+  unavailableOnTestnetHTML,
   errorFrag,
   CSS_VERSION,
 } from "./src/html.js";
@@ -117,19 +119,24 @@ app.use(express.static("public"));
 // cookie, stale/unknown endpoint) falls through to the default shuffled
 // pool — the whitelist check also keeps a forged cookie from turning this
 // into an open server-side fetch proxy.
-app.use((req, res, next) => {
-  const raw = req.headers.cookie || "";
-  let selected = null;
-  for (const part of raw.split(";")) {
+function parseCookies(header) {
+  const out = {};
+  for (const part of header.split(";")) {
     const i = part.indexOf("=");
     if (i === -1) continue;
-    if (part.slice(0, i).trim() === "nemscan-node") {
-      selected = decodeURIComponent(part.slice(i + 1).trim());
-      break;
-    }
+    out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
   }
-  const node = selected ? findNodeOption(selected) : null;
-  nodeContext.run(node, () => next());
+  return out;
+}
+
+app.use((req, res, next) => {
+  const cookies = parseCookies(req.headers.cookie || "");
+  const network = cookies["nemscan-network"] === "testnet" ? "testnet" : "mainnet";
+  networkContext.run(network, () => {
+    const selected = cookies["nemscan-node"] || null;
+    const node = selected ? findNodeOption(selected, network) : null;
+    nodeContext.run(node, () => next());
+  });
 });
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -558,10 +565,12 @@ app.get("/api/namespace/:fqn", async (req, res) => {
   try {
     const root = fqn.split(".")[0];
     let subNamespaces = [];
-    try {
-      subNamespaces = await fetchSubNamespaces(root);
-    } catch {
-      /* nemtool unreachable — fall back to local lookup only */
+    if (currentNetwork() !== "testnet") {
+      try {
+        subNamespaces = await fetchSubNamespaces(root);
+      } catch {
+        /* nemtool unreachable — fall back to local lookup only */
+      }
     }
     const ns =
       fqn === root
@@ -733,25 +742,29 @@ app.get("/polls", (req, res) => {
 });
 
 app.get("/api/polls", async (req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  if (currentNetwork() === "testnet") {
+    return res.send(unavailableOnTestnetHTML("Polls"));
+  }
   try {
     const items = getCachedPolls(25);
-    res.setHeader("Content-Type", "text/html");
     res.send(pollsListHTML(items, getCachedPollsCount()));
   } catch (err) {
-    res.status(503).setHeader("Content-Type", "text/html");
+    res.status(503);
     res.send(errorFrag(err.message, "/api/polls", "#polls-card"));
   }
 });
 
 app.get("/api/polls/more", (req, res) => {
   const offset = Math.max(0, parseInt(req.query.offset) || 0);
+  res.setHeader("Content-Type", "text/html");
+  if (currentNetwork() === "testnet") return res.send("");
   try {
     const items = getCachedPolls(25, offset);
     const total = getCachedPollsCount();
-    res.setHeader("Content-Type", "text/html");
     res.send(pollMoreRows(items, offset, total));
   } catch (err) {
-    res.status(503).setHeader("Content-Type", "text/html");
+    res.status(503);
     res.send("");
   }
 });
@@ -776,7 +789,7 @@ app.get("/nodes", (req, res) => {
 
 app.get("/api/nodes", (req, res) => {
   res.setHeader("Content-Type", "text/html");
-  res.send(nodesListHTML(httpsNodeOptions, httpsNodeOptionsUpdatedAt !== null));
+  res.send(nodesListHTML(getHttpsNodeOptions(), getHttpsNodeOptionsUpdatedAt() !== null));
 });
 
 // Accounts (rich list)
@@ -798,29 +811,33 @@ app.get("/accounts", (req, res) => {
 });
 
 app.get("/api/accounts", async (req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  if (currentNetwork() === "testnet") {
+    return res.send(unavailableOnTestnetHTML("Rich list"));
+  }
   try {
     if (!liveRichList.length) {
       await refreshLiveRichList();
     }
     const items = liveRichList.slice(0, 25);
-    res.setHeader("Content-Type", "text/html");
     res.send(
       accountsListHTML(items, liveRichListUpdatedAt, liveRichList.length),
     );
   } catch (err) {
-    res.status(503).setHeader("Content-Type", "text/html");
+    res.status(503);
     res.send(errorFrag(err.message, "/api/accounts", "#accounts-card"));
   }
 });
 
 app.get("/api/accounts/more", async (req, res) => {
   const offset = Math.max(0, parseInt(req.query.offset) || 0);
+  res.setHeader("Content-Type", "text/html");
+  if (currentNetwork() === "testnet") return res.send("");
   try {
     const items = liveRichList.slice(offset, offset + 25);
-    res.setHeader("Content-Type", "text/html");
     res.send(accountMoreRows(items, offset, liveRichList.length));
   } catch (err) {
-    res.status(503).setHeader("Content-Type", "text/html");
+    res.status(503);
     res.send("");
   }
 });
@@ -876,25 +893,44 @@ app.use((req, res) => {
 // The candidate-address pool changes rarely, so it's rebuilt only a few times
 // a day; the live rich-list re-queries each candidate's *current* balance from
 // the chain, so it refreshes much more often to stay accurate.
+const NETWORK_KEYS = Object.keys(NETWORKS); // ["mainnet", "testnet"]
+
+// Runs `fn` once, with the given network active in networkContext for the
+// duration of `fn`'s (possibly async) execution. Each call is a fresh
+// `.run()`, not nested inside a previous one, so this doesn't depend on
+// AsyncLocalStorage surviving indefinitely across chained timers — every
+// setInterval tick below re-enters a brand-new context from scratch.
+function runFor(network, fn) {
+  return networkContext.run(network, fn);
+}
+function runForEachNetwork(fn) {
+  for (const network of NETWORK_KEYS) runFor(network, fn);
+}
+
 setTimeout(() => {
-  refreshNamespacesCache().then(refreshMosaicsCache);
-  importNamespaceArchive();
-  importMosaicArchive();
-  importPollArchive();
-  refreshRichListCache().then(refreshLiveRichList);
-  refreshPriceCache();
-  refreshHttpsNodeOptions();
-  setInterval(refreshNamespacesCache, 10 * 60 * 1000);
-  setInterval(refreshMosaicsCache, 10 * 60 * 1000);
-  setInterval(refreshRichListCache, 6 * 60 * 60 * 1000);
-  setInterval(refreshLiveRichList, 5 * 60 * 1000);
-  setInterval(refreshPriceCache, 60 * 1000);
-  setInterval(refreshHttpsNodeOptions, 5 * 60 * 1000);
+  // Network-agnostic jobs: run for both mainnet and testnet.
+  runForEachNetwork(() => refreshNamespacesCache().then(refreshMosaicsCache));
+  runForEachNetwork(refreshHttpsNodeOptions);
+  NETWORK_KEYS.forEach((network) => scheduleDailyTxStatsRefresh(network));
+
+  // Mainnet-only jobs: their data sources (nemtool.com, nemnodes.org,
+  // CoinGecko) have no testnet equivalent.
+  runFor("mainnet", importNamespaceArchive);
+  runFor("mainnet", importMosaicArchive);
+  runFor("mainnet", importPollArchive);
+  runFor("mainnet", () => refreshRichListCache().then(refreshLiveRichList));
+  runFor("mainnet", refreshPriceCache);
+
+  setInterval(() => runForEachNetwork(refreshNamespacesCache), 10 * 60 * 1000);
+  setInterval(() => runForEachNetwork(refreshMosaicsCache), 10 * 60 * 1000);
+  setInterval(() => runFor("mainnet", refreshRichListCache), 6 * 60 * 60 * 1000);
+  setInterval(() => runFor("mainnet", refreshLiveRichList), 5 * 60 * 1000);
+  setInterval(() => runFor("mainnet", refreshPriceCache), 60 * 1000);
+  setInterval(() => runForEachNetwork(refreshHttpsNodeOptions), 5 * 60 * 1000);
   // Deep mosaic refresh: first run 2 minutes after startup to avoid congestion,
   // then every 6 hours. Covers all known namespaces and refreshes current supply.
-  setTimeout(refreshAllMosaicsDeep, 2 * 60 * 1000);
-  setInterval(refreshAllMosaicsDeep, 6 * 60 * 60 * 1000);
-  scheduleDailyTxStatsRefresh();
+  setTimeout(() => runForEachNetwork(refreshAllMosaicsDeep), 2 * 60 * 1000);
+  setInterval(() => runForEachNetwork(refreshAllMosaicsDeep), 6 * 60 * 60 * 1000);
 }, 3000);
 
 app.listen(PORT, "0.0.0.0", () =>
