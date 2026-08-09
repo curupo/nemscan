@@ -1788,10 +1788,11 @@ export function mosaicsListHTML(items, updatedAt, limit) {
 // ── Nodes list HTML ───────────────────────────────────────────────────────────
 
 export function renderNodeRow(n, num) {
+  const badge = n.protocol === "http" ? ` <span class="proto-badge">HTTP</span>` : "";
   return `<tr>
     <td class="td-num">${num}</td>
     <td>${esc(n.name || "\u2014")}</td>
-    <td><div class="node-endpoint-cell"><a href="${esc(n.endpoint)}/node/info" class="mono-link" target="_blank" rel="noopener">${esc(n.host || n.endpoint)}</a></div></td>
+    <td><div class="node-endpoint-cell"><a href="${esc(n.endpoint)}/node/info" class="mono-link" target="_blank" rel="noopener">${esc(n.host || n.endpoint)}</a>${badge}</div></td>
     <td><span class="status-ok">\u25cf Active</span></td>
   </tr>`;
 }
@@ -1807,7 +1808,7 @@ export function nodesListHTML(nodes, probed) {
     <div class="card-title">Active Nodes <span class="live-pill"><span class="live-dot"></span>Live</span></div>
     <span class="total-txt"><strong>${nodes.length}</strong> active</span>
   </div>
-  <p class="archive-note"><span class="archive-note-icon">&#9432;</span>The node information on this page is sourced from <a href="https://nodewatch.symbol.tools/" target="_blank" rel="noopener">nodewatch.symbol.tools</a>, a network crawler that lists all discovered NEM nodes, verified here by an HTTPS reachability check.</p>
+  <p class="archive-note"><span class="archive-note-icon">&#9432;</span>The node information on this page is sourced from <a href="https://nodewatch.symbol.tools/" target="_blank" rel="noopener">nodewatch.symbol.tools</a>, a network crawler that lists all discovered NEM nodes, verified here by a live reachability check over HTTPS or HTTP.</p>
   <div class="tbl-wrap"><table>
     <thead><tr><th>#</th><th>Name</th><th>Endpoint</th><th>Status</th></tr></thead>
     <tbody>${nodes.map((n, i) => renderNodeRow(n, i + 1)).join("")}</tbody>

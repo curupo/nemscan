@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { globalTxMoreRows } from "../src/html.js";
+import { globalTxMoreRows, renderNodeRow } from "../src/html.js";
 
 test("globalTxMoreRows keeps the Load More control when a scan window finds zero txs but the chain isn't exhausted", () => {
   // getTxsFromBlocks legitimately returns items: [] with nextFromBlock >= 1
@@ -25,4 +25,20 @@ test("globalTxMoreRows keeps the Load More control when a scan window finds zero
 test("globalTxMoreRows drops the Load More control once the chain is exhausted", () => {
   const html = globalTxMoreRows([], 0);
   assert.equal(html, "");
+});
+
+test("renderNodeRow shows an HTTP badge for a protocol:http node", () => {
+  const html = renderNodeRow(
+    { name: "onlyhttp", host: "onlyhttp:7890", endpoint: "http://onlyhttp:7890", protocol: "http" },
+    1,
+  );
+  assert.match(html, /proto-badge">HTTP<\/span>/);
+});
+
+test("renderNodeRow shows no protocol badge for a protocol:https node", () => {
+  const html = renderNodeRow(
+    { name: "onlyhttps", host: "onlyhttps:7891", endpoint: "https://onlyhttps:7891", protocol: "https" },
+    1,
+  );
+  assert.doesNotMatch(html, /proto-badge/);
 });
