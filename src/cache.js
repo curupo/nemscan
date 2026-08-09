@@ -454,22 +454,26 @@ export async function refreshLiveRichList() {
 
 // ── XEM price ─────────────────────────────────────────────────────────────────
 
-// XEM has no price on the NEM network itself — pull the USDT spot price and
-// 24h change straight from KuCoin's public ticker so the navbar can show a
-// live "XEM Price" readout like Etherscan/Arbiscan do for ETH.
-const KUCOIN_TICKER_URL =
-  "https://api.kucoin.com/api/v1/market/stats?symbol=XEM-USDT";
+// XEM has no price on the NEM network itself — pull the USD spot price and
+// 24h change straight from CoinGecko's public API so the navbar can show a
+// live "XEM Price" readout like Etherscan/Arbiscan do for ETH. (KuCoin used
+// to be the source here, but it delisted XEM entirely.)
+const COINGECKO_TICKER_URL =
+  "https://api.coingecko.com/api/v3/simple/price?ids=nem&vs_currencies=usd&include_24hr_change=true";
 
-async function fetchXemPriceFromKucoin() {
-  const res = await fetch(KUCOIN_TICKER_URL);
+export async function fetchXemPriceFromCoinGecko() {
+  const res = await fetch(COINGECKO_TICKER_URL);
   if (!res.ok) throw new Error(`status ${res.status}`);
   const json = await res.json();
-  const data = json.data;
-  if (!data || data.last == null || data.changeRate == null)
+  const data = json.nem;
+  if (!data || data.usd == null || data.usd_24h_change == null)
     throw new Error("no ticker data");
   return {
-    price: parseFloat(data.last),
-    changeRate: parseFloat(data.changeRate),
+    price: parseFloat(data.usd),
+    // CoinGecko reports the 24h change as a percentage (e.g. 27.75); keep
+    // this function's contract as a fraction (0.2775) to match the rest of
+    // the app, which multiplies by 100 for display.
+    changeRate: parseFloat(data.usd_24h_change) / 100,
   };
 }
 
@@ -478,7 +482,7 @@ export async function refreshPriceCache() {
   if (_refreshingPrice) return;
   _refreshingPrice = true;
   try {
-    const { price, changeRate } = await fetchXemPriceFromKucoin();
+    const { price, changeRate } = await fetchXemPriceFromCoinGecko();
     setCacheMeta("xem_price", price);
     setCacheMeta("xem_change_rate", changeRate);
   } catch (err) {

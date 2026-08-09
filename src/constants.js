@@ -33,6 +33,15 @@ export const TX_TYPES = {
 
 export const DAILY_TX_BACKFILL_CHUNK = 60;
 
+// Hard cap on how many blocks getTxsFromBlocks() will walk backward looking
+// for `limit` transactions. Real tx density near the chain tip can be sparse
+// enough that reaching the default limit (25) takes hundreds of blocks —
+// each an uncached network round-trip — so without a cap a single request
+// can take minutes. Bounding total scan depth trades a possibly-short first
+// page (caller paginates further via the returned nextFromBlock) for a
+// bounded worst-case latency.
+export const MAX_BLOCK_SCAN_DEPTH = 500;
+
 // ── Network / fetch ───────────────────────────────────────────────────────────
 
 // Default per-request timeout for sequential nemFetch calls.
