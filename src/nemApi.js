@@ -1,4 +1,4 @@
-import { nodeContext } from "./context.js";
+import { nodeContext, currentNetwork } from "./context.js";
 import { getShuffledNodePool } from "./nodePool.js";
 import {
   blockCache,
@@ -113,9 +113,10 @@ export async function fetchBlockRaw(height) {
 }
 
 export async function getBlock(height) {
-  if (blockCache.has(height)) return blockCache.get(height);
+  const key = `${currentNetwork()}:${height}`;
+  if (blockCache.has(key)) return blockCache.get(key);
   const block = await fetchBlockRaw(height);
-  blockCache.set(height, block);
+  blockCache.set(key, block);
   if (blockCache.size > BLOCK_CACHE_MAX_SIZE)
     blockCache.delete(blockCache.keys().next().value);
   return block;
