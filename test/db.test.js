@@ -1,13 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { unlinkSync, existsSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { networkContext } from "../src/context.js";
 
-// db.js opens both SQLite files at import time as a side effect, so clean up
-// any stale testnet DB from a previous run before importing it.
-for (const f of ["./cache-testnet.db", "./cache-testnet.db-shm", "./cache-testnet.db-wal"]) {
-  if (existsSync(f)) unlinkSync(f);
-}
+// db.js opens both SQLite files at import time as a side effect, and resolves
+// their paths from NETWORKS[*].dbFile, which honours NEMSCAN_DB_DIR. Point it
+// at a fresh scratch directory so this test never touches the real
+// cache.db / cache-testnet.db in the repo root. The env var must be set
+// before importing db.js (or constants.js indirectly via db.js).
+process.env.NEMSCAN_DB_DIR = mkdtempSync(join(tmpdir(), "nemscan-db-test-"));
 
 const { setCacheMeta, getCacheMeta } = await import("../src/db.js");
 
