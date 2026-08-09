@@ -1,5 +1,5 @@
 import {
-  db,
+  getDb,
   getCachedNamespaces,
   getArchivedNamespacesCount,
   getArchivedMosaicsCount,
@@ -207,7 +207,8 @@ export async function refreshAllMosaicsDeep() {
     // that have mosaic records in the archive but may not appear in the namespace list.
     const nsSet = new Set();
     getNamespacesWithArchive(10000, 0).forEach((ns) => nsSet.add(ns.fqn));
-    db.prepare("SELECT DISTINCT namespace FROM mosaics_archive")
+    getDb()
+      .prepare("SELECT DISTINCT namespace FROM mosaics_archive")
       .all()
       .forEach((r) => nsSet.add(r.namespace));
     const namespaces = [...nsSet];
@@ -268,13 +269,13 @@ const NEMTOOL_MOSAIC_LIST_URL =
 export async function importMosaicArchive() {
   if (getCacheMeta("mosaics_archive_imported")) {
     // Re-import if height data is missing (schema upgrade from older DB).
-    const hasHeight = db
+    const hasHeight = getDb()
       .prepare(
         "SELECT COUNT(*) AS c FROM mosaics_archive WHERE height IS NOT NULL",
       )
       .get().c;
     if (hasHeight) return;
-    db.exec("DELETE FROM cache_meta WHERE key = 'mosaics_archive_imported'");
+    getDb().exec("DELETE FROM cache_meta WHERE key = 'mosaics_archive_imported'");
   }
   let cursor = null;
   let imported = 0;
