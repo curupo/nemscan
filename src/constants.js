@@ -42,6 +42,16 @@ export const DAILY_TX_BACKFILL_CHUNK = 60;
 // bounded worst-case latency.
 export const MAX_BLOCK_SCAN_DEPTH = 500;
 
+// Wall-clock companion to MAX_BLOCK_SCAN_DEPTH. A block-count cap alone
+// doesn't bound latency: nemFetch() falls back sequentially through up to
+// SEQUENTIAL_MAX_NODES nodes (DEFAULT_FETCH_TIMEOUT_MS each) before a single
+// getBlock() call fails, so one unhealthy node in the pool can stall a batch
+// for many seconds — and a sparse-density scan repeats that exposure up to
+// 100 times per request. Checked between batches, so it stops the walk from
+// compounding many such stalls into a load that never finishes, though it
+// doesn't preempt a batch already in flight.
+export const MAX_BLOCK_SCAN_MS = 8000;
+
 // ── Network / fetch ───────────────────────────────────────────────────────────
 
 // Default per-request timeout for sequential nemFetch calls.

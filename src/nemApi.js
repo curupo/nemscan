@@ -9,6 +9,7 @@ import {
   RACE_MAX_NODES,
   SEQUENTIAL_MAX_NODES,
   MAX_BLOCK_SCAN_DEPTH,
+  MAX_BLOCK_SCAN_MS,
 } from "./constants.js";
 
 // ── Core fetch ────────────────────────────────────────────────────────────────
@@ -168,6 +169,7 @@ export async function getAccountNamespaces(address) {
 export async function getTxsFromBlocks(fromHeight, limit = 25) {
   const items = [];
   let h = fromHeight;
+  const startedAt = Date.now();
 
   while (items.length < limit && h >= 1) {
     const batchSize = Math.min(5, h);
@@ -193,6 +195,14 @@ export async function getTxsFromBlocks(fromHeight, limit = 25) {
     // any reasonable page-load budget. Caller paginates further via
     // nextFromBlock.
     if (fromHeight - h >= MAX_BLOCK_SCAN_DEPTH) break;
+
+    // Safety: also cap wall-clock time. A block-count cap alone assumes
+    // every batch is fast, but one unhealthy node in the pool can stall a
+    // single batch for many seconds (nemFetch falls back through several
+    // nodes before giving up) — and this loop repeats that exposure up to
+    // 100 times when density is sparse. Bail out on elapsed time too so a
+    // few slow batches can't compound into a request that never finishes.
+    if (Date.now() - startedAt >= MAX_BLOCK_SCAN_MS) break;
   }
 
   return { items, nextFromBlock: h };
