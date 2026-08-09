@@ -20,9 +20,9 @@ import {
   esc,
   decodeMsg,
 } from "./helpers.js";
-import { nodeContext } from "./context.js";
-import { httpsNodeOptions, httpsNodeOptionsUpdatedAt } from "./nodePool.js";
-import { TX_TYPES, XEM_TOTAL_SUPPLY, DAILY_TX_DAYS } from "./constants.js";
+import { nodeContext, currentNetwork } from "./context.js";
+import { getHttpsNodeOptions, getHttpsNodeOptionsUpdatedAt } from "./nodePool.js";
+import { TX_TYPES, XEM_TOTAL_SUPPLY, DAILY_TX_DAYS, NETWORKS } from "./constants.js";
 
 // ── CSS cache-busting version ───────────────────────────────────────────────────────
 
@@ -80,12 +80,19 @@ export function xemPriceHTML() {
   return `<div class="xem-price">XEM Price: <strong>$${formatUsdPrice(price)}</strong> <span class="${up ? "price-up" : "price-down"}">(${sign}${changePct.toFixed(2)}%)</span></div>`;
 }
 
+// Resolves the correct NIS1 address network byte (mainnet 0x68 / testnet
+// 0x98) for the request currently being rendered. Replaces direct
+// pubKeyToAddress(...) calls throughout this file.
+function addrFromPubKey(hex) {
+  return pubKeyToAddress(hex, NETWORKS[currentNetwork()].addressNetworkByte);
+}
+
 export function nodeSwitchHTML() {
   const active = nodeContext.getStore();
   const activeEndpoint = active ? active.endpoint : "";
   const activeLabel = active ? active.name : "Auto";
   const isActive = (ep) => (ep === activeEndpoint ? " active" : "");
-  const items = [...httpsNodeOptions]
+  const items = [...getHttpsNodeOptions()]
     .sort((a, b) => a.name.localeCompare(b.name))
     .map(
       (n) => `
@@ -108,9 +115,41 @@ export function nodeSwitchHTML() {
           <span class="node-menu-text"><span class="node-menu-name">Auto</span><span class="node-menu-sub">randomized node pool</span></span>
         </button>
         <div class="node-menu-sep"></div>
-        ${items || `<div class="node-menu-empty">${httpsNodeOptionsUpdatedAt ? "No HTTPS-reachable nodes right now" : "Probing active nodes for HTTPS…"}</div>`}
+        ${items || `<div class="node-menu-empty">${getHttpsNodeOptionsUpdatedAt() ? "No HTTPS-reachable nodes right now" : "Probing active nodes for HTTPS…"}</div>`}
       </div>
     </div>`;
+}
+
+export function networkSwitchHTML() {
+  const active = currentNetwork();
+  const items = Object.entries(NETWORKS)
+    .map(
+      ([key, cfg]) => `
+        <button type="button" class="node-menu-item${key === active ? " active" : ""}" data-network="${key}" role="menuitem" onclick="selectNetwork(this)">
+          <span class="node-menu-dot"></span>
+          <span class="node-menu-text"><span class="node-menu-name">${esc(cfg.label)}</span></span>
+        </button>`,
+    )
+    .join("");
+  return `<div class="node-switch network-switch">
+      <button type="button" class="node-switch-btn" aria-haspopup="true" aria-expanded="false" onclick="toggleNodeMenu(event)" title="Network">
+        <span class="node-switch-dot is-live"></span>
+        <span class="node-switch-label">${esc(NETWORKS[active].label)}</span>
+        <span class="node-switch-caret">&#9662;</span>
+      </button>
+      ${active === "testnet" ? '<span class="network-badge">TESTNET</span>' : ""}
+      <div class="node-menu" role="menu" aria-label="Network">
+        ${items}
+      </div>
+    </div>`;
+}
+
+export function unavailableOnTestnetHTML(label) {
+  return `<div class="error-state">
+    <div class="error-icon">ℹ</div>
+    <p class="error-title">Not available on testnet</p>
+    <p class="error-msg">${esc(label)} isn't available while browsing testnet.</p>
+  </div>`;
 }
 
 // Shared markup for the navbar's price/search/node/theme controls — rendered
@@ -127,6 +166,7 @@ export function navToolsHTML(showSearch = true) {
     </form>`
         : '<div style="flex:1 1 auto"></div>'
     }
+    ${networkSwitchHTML()}
     ${nodeSwitchHTML()}
     <div class="theme-switch">
       <button type="button" class="theme-switch-btn" aria-haspopup="true" aria-expanded="false" onclick="toggleThemeMenu(event)" title="Theme">
@@ -322,6 +362,15 @@ export function themeInitScript() {
     } catch (e) {}
     closeMenus();
     location.reload();
+  };
+  var NETWORK_KEY = 'nemscan-network';
+  window.selectNetwork = function(btn) {
+    var network = btn.dataset.network === 'testnet' ? 'testnet' : 'mainnet';
+    try {
+      document.cookie = NETWORK_KEY + '=' + encodeURIComponent(network) + ';path=/;max-age=2592000;samesite=lax';
+    } catch (e) {}
+    closeMenus();
+    location.href = '/';
   };
   document.addEventListener('click', closeMenus);
   document.addEventListener('DOMContentLoaded', function() { sync(theme); });
@@ -563,7 +612,7 @@ export function homeBlocksPanelHTML(blocks) {
   const rows = blocks
     .map((b) => {
       const date = nemDate(b.timeStamp);
-      const signer = pubKeyToAddress(b.signer) ?? b.signer;
+      const signer = addrFromPubKey(b.signer) ?? b.signer;
       return `<tr>
       <td><a href="/block/${b.height}" class="blk-num">${b.height}</a></td>
       <td><div class="age-rel">${timeAgo(date)}</div></td>
@@ -594,7 +643,7 @@ export function homeTxsPanelHTML(txs) {
           const { tx, blockTime } = item;
           const date = nemDate(blockTime);
           const isTransfer = tx.type === 257;
-          const senderAddr = pubKeyToAddress(tx.signer) ?? tx.signer;
+          const senderAddr = addrFromPubKey(tx.signer) ?? tx.signer;
           const amountCell = isTransfer
             ? `${xem(tx.amount)} XEM`
             : `<span class="muted">—</span>`;
@@ -796,7 +845,7 @@ export function blocksTableHTML(blocks, page, totalPages, limit, chainHeight) {
       <td><div class="age-rel">${timeAgo(date)}</div>
           <div class="age-abs">${date.toISOString().slice(0, 19).replace("T", " ")} UTC</div></td>
       <td><span class="txn-pill ${txns > 0 ? "txn-pos" : "txn-zero"}">${txns}</span></td>
-      <td>${((a) => `<a href="/account/${a}" class="harv" title="${a}">${truncKey(a)}</a>`)(pubKeyToAddress(b.signer) ?? b.signer)}</td>
+      <td>${((a) => `<a href="/account/${a}" class="harv" title="${a}">${truncKey(a)}</a>`)(addrFromPubKey(b.signer) ?? b.signer)}</td>
       <td class="diff-val">${formatDiff(b.difficulty)}</td>
       <td class="fee-val">${xem(b.totalFee)} XEM</td>
     </tr>`;
@@ -869,7 +918,7 @@ export function blockDetailHTML(block, chainHeight) {
     [
       "Harvester",
       (() => {
-        const a = pubKeyToAddress(block.signer) ?? block.signer;
+        const a = addrFromPubKey(block.signer) ?? block.signer;
         return `<a href="/account/${a}" class="mono-link" title="${a}">${truncKey(a)}</a> <button class="copy-btn" onclick="copy('${a}')">copy</button>`;
       })(),
     ],
@@ -900,7 +949,7 @@ export function blockDetailHTML(block, chainHeight) {
           const txRows = txns
             .map((tx, i) => {
               const isT = tx.type === 257;
-              const senderAddr = pubKeyToAddress(tx.signer) ?? tx.signer;
+              const senderAddr = addrFromPubKey(tx.signer) ?? tx.signer;
               const recip = isT
                 ? `<a href="/account/${tx.recipient}" class="mono-link">${truncKey(tx.recipient)}</a>`
                 : "—";
@@ -999,7 +1048,7 @@ export function blockDetailHTML(block, chainHeight) {
 export function txDetailHTML(tx, hash, height) {
   const date = nemDate(tx.timeStamp);
   const isT = tx.type === 257;
-  const senderAddr = pubKeyToAddress(tx.signer) ?? tx.signer;
+  const senderAddr = addrFromPubKey(tx.signer) ?? tx.signer;
   const msg = decodeMsg(tx.message);
 
   const rows = [
@@ -1167,7 +1216,7 @@ export function renderTxRow(pair, accountAddress) {
   const isTransfer = tx.type === 257;
   const isIncoming = isTransfer && tx.recipient === accountAddress;
 
-  const senderAddr = pubKeyToAddress(tx.signer) ?? tx.signer;
+  const senderAddr = addrFromPubKey(tx.signer) ?? tx.signer;
   let dirBadge, fromCell, toCell, amountCell;
   if (isTransfer) {
     if (isIncoming) {
@@ -1237,7 +1286,7 @@ export function renderGlobalTxRow(item) {
   const { tx, height, blockTime } = item;
   const date = nemDate(blockTime);
   const isTransfer = tx.type === 257;
-  const senderAddr = pubKeyToAddress(tx.signer) ?? tx.signer;
+  const senderAddr = addrFromPubKey(tx.signer) ?? tx.signer;
 
   const toCell = isTransfer
     ? `<a href="/account/${tx.recipient}" class="mono-link" title="${tx.recipient}">${truncKey(tx.recipient)}</a>`
@@ -1428,7 +1477,7 @@ export function mosaicNotFoundHTML(namespace, name) {
 
 export function mosaicDetailHTML(m, liveData) {
   const owner = /^[0-9a-f]{64}$/i.test(m.creator)
-    ? pubKeyToAddress(m.creator)
+    ? addrFromPubKey(m.creator)
     : m.creator;
   const supply = (m.supply / Math.pow(10, m.divisibility)).toLocaleString(
     "en",
@@ -1639,7 +1688,7 @@ export function renderMosaicRow(m, num) {
   // Live rows store the creator as a hex public key; archive rows imported
   // from explorer.nemtool.com already give us the resolved address.
   const owner = /^[0-9a-f]{64}$/i.test(m.creator)
-    ? pubKeyToAddress(m.creator)
+    ? addrFromPubKey(m.creator)
     : m.creator;
   const supply = (m.supply / Math.pow(10, m.divisibility)).toLocaleString(
     "en",
