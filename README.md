@@ -50,13 +50,13 @@ nemscan/
     └── manifest.json
 ```
 
-## データの初期化・再同期
-
 ## mainnet / testnet
 
 画面右上のドロップダウンで mainnet ⇄ testnet を切り替えられます（訪問者ごとの Cookie 設定、サーバー再起動不要）。testnet は独立した SQLite ファイル（`cache-testnet.db`）と、独立したノードプール・アドレス形式（`T` 始まり）を持ちます。
 
 XEM 価格表示・ネームスペース/モザイクの歴史アーカイブ・ポール一覧・リッチリスト(Accounts)は mainnet 専用の外部データソースに依存しているため、testnet では利用できません。
+
+## データの初期化・再同期
 
 ### キャッシュ DB をすべて削除して最初からやり直す
 

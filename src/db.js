@@ -89,6 +89,10 @@ function openDbLayer(file) {
   const _nsArchCountStmt = db.prepare(
     "SELECT COUNT(*) AS c FROM namespaces_archive",
   );
+  // Live cache only ever holds the newest ~25 root namespaces (NIS pagination is
+  // broken beyond page one — see fetchNamespacesFromNode), so for display we
+  // merge it with the historical archive imported from explorer.nemtool.com,
+  // preferring the live row whenever a namespace appears in both.
   const _nsCombinedSelectStmt = db.prepare(`
     SELECT fqn, owner, height FROM (
       SELECT fqn, owner, height FROM namespaces
@@ -123,6 +127,11 @@ function openDbLayer(file) {
   const _mosArchCountStmt = db.prepare(
     "SELECT COUNT(*) AS c FROM mosaics_archive",
   );
+  // Live cache only ever covers mosaics under the ~25 most-recently-cached root
+  // namespaces (it's derived from getCachedNamespaces — see refreshMosaicsCache),
+  // so for display we merge it with the historical archive imported from
+  // explorer.nemtool.com, preferring the live row whenever a mosaic ID
+  // (namespace:name) appears in both.
   const _mosCombinedSelectStmt = db.prepare(`
     SELECT namespace, name, creator, description, divisibility, supply, transferable, height, time_stamp FROM (
       SELECT namespace, name, creator, description, divisibility, supply, transferable, height, time_stamp FROM mosaics
