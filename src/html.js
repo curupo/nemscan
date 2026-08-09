@@ -1336,7 +1336,13 @@ export function globalTxTableHTML(items, chainHeight, nextFromBlock) {
 }
 
 export function globalTxMoreRows(items, nextFromBlock) {
-  if (!items.length) return "";
+  // Unlike the other *MoreRows helpers, this paginates an open-ended block
+  // scan rather than a fixed, fully-known list: getTxsFromBlocks legitimately
+  // returns items: [] with nextFromBlock >= 1 when a scan batch is capped
+  // before finding a transaction (sparse block range, or a bad node in the
+  // "Auto" pool making getBlock() calls fail). Exhaustion is signalled by
+  // nextFromBlock alone (handled inside globalLoadMoreRow) — an empty batch
+  // must not drop the Load More control, or pagination dead-ends early.
   return (
     items.map(renderGlobalTxRow).join("") + globalLoadMoreRow(nextFromBlock)
   );
