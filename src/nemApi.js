@@ -8,6 +8,7 @@ import {
   BLOCK_CACHE_MAX_SIZE,
   RACE_MAX_NODES,
   SEQUENTIAL_MAX_NODES,
+  MAX_BLOCK_SCAN_DEPTH,
 } from "./constants.js";
 
 // ── Core fetch ────────────────────────────────────────────────────────────────
@@ -186,8 +187,12 @@ export async function getTxsFromBlocks(fromHeight, limit = 25) {
     }
     h -= batchSize;
 
-    // Safety: if we've scanned many empty blocks, stop
-    if (items.length === 0 && fromHeight - h > 200) break;
+    // Safety: cap total scan depth regardless of how many transactions
+    // we've found so far — sparse tx density can otherwise keep this
+    // walking (and round-tripping to a node) for hundreds of blocks past
+    // any reasonable page-load budget. Caller paginates further via
+    // nextFromBlock.
+    if (fromHeight - h >= MAX_BLOCK_SCAN_DEPTH) break;
   }
 
   return { items, nextFromBlock: h };
