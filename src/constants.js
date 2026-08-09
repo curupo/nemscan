@@ -91,3 +91,28 @@ export const DEEP_REFRESH_BATCH_DELAY_MS = 200;
 
 // Timeout for probing whether a discovered node candidate speaks HTTPS.
 export const NODE_PROBE_TIMEOUT_MS = 6000;
+
+// ── Networks (mainnet / testnet) ────────────────────────────────────────────────
+
+// Verified reachable over HTTPS (2026-08-09).
+export const NEM_TESTNET_NODES_FALLBACK = [
+  "https://ntn1.dusanjp.com:7891",
+  "https://ntn2.dusanjp.com:7891",
+];
+
+export const NETWORKS = {
+  mainnet: {
+    label: "Mainnet",
+    nodeSourceApi: "https://nodewatch.symbol.tools/api/nem/nodes",
+    fallbackNodes: NEM_NODES_FALLBACK,
+    addressNetworkByte: 0x68,
+    dbFile: "./cache.db",
+  },
+  testnet: {
+    label: "Testnet",
+    nodeSourceApi: "https://nodewatch.symbol.tools/testnet/api/nem/nodes",
+    fallbackNodes: NEM_TESTNET_NODES_FALLBACK,
+    addressNetworkByte: 0x98,
+    dbFile: "./cache-testnet.db",
+  },
+};
