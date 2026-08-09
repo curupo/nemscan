@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { globalTxMoreRows, renderNodeRow } from "../src/html.js";
+import { globalTxMoreRows, renderNodeRow, nodeSwitchHTML } from "../src/html.js";
+import { refreshNodeOptions } from "../src/nodePool.js";
 
 test("globalTxMoreRows keeps the Load More control when a scan window finds zero txs but the chain isn't exhausted", () => {
   // getTxsFromBlocks legitimately returns items: [] with nextFromBlock >= 1
@@ -41,4 +42,23 @@ test("renderNodeRow shows no protocol badge for a protocol:https node", () => {
     1,
   );
   assert.doesNotMatch(html, /proto-badge/);
+});
+
+test("nodeSwitchHTML renders exactly one HTTP badge when the pool has one http and one https entry for the same host", async (t) => {
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [{ endpoint: "http://mixed:7890", name: "mixed" }],
+    };
+  });
+  await refreshNodeOptions("mainnet");
+  const html = nodeSwitchHTML();
+  const badgeCount = (html.match(/proto-badge">HTTP<\/span>/g) || []).length;
+  assert.equal(badgeCount, 1);
+  assert.match(html, /mixed:7890/);
+  assert.match(html, /mixed:7891/);
 });

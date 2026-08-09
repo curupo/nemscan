@@ -94,13 +94,14 @@ export function nodeSwitchHTML() {
   const isActive = (ep) => (ep === activeEndpoint ? " active" : "");
   const items = [...getNodeOptions()]
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map(
-      (n) => `
+    .map((n) => {
+      const badge = n.protocol === "http" ? ` <span class="proto-badge">HTTP</span>` : "";
+      return `
         <button type="button" class="node-menu-item${isActive(n.endpoint)}" data-node-endpoint="${esc(n.endpoint)}" data-node-name="${esc(n.name)}" role="menuitem" onclick="selectNode(this)">
           <span class="node-menu-dot"></span>
-          <span class="node-menu-text"><span class="node-menu-name">${esc(n.name)}</span><span class="node-menu-sub">${esc(n.host)}</span></span>
-        </button>`,
-    )
+          <span class="node-menu-text"><span class="node-menu-name">${esc(n.name)}</span><span class="node-menu-sub">${esc(n.host)}${badge}</span></span>
+        </button>`;
+    })
     .join("");
   return `<div class="node-switch">
       <button type="button" class="node-switch-btn" aria-haspopup="true" aria-expanded="false" onclick="toggleNodeMenu(event)" title="Connection node">
@@ -109,13 +110,13 @@ export function nodeSwitchHTML() {
         <span class="node-switch-caret">&#9662;</span>
       </button>
       <div class="node-menu" role="menu" aria-label="Connection node">
-        <div class="node-menu-head">Connect via <span class="node-menu-note">active HTTPS nodes</span></div>
+        <div class="node-menu-head">Connect via <span class="node-menu-note">active nodes</span></div>
         <button type="button" class="node-menu-item${isActive("")}" data-node-endpoint="" data-node-name="Auto" role="menuitem" onclick="selectNode(this)">
           <span class="node-menu-dot"></span>
           <span class="node-menu-text"><span class="node-menu-name">Auto</span><span class="node-menu-sub">randomized node pool</span></span>
         </button>
         <div class="node-menu-sep"></div>
-        ${items || `<div class="node-menu-empty">${getNodeOptionsUpdatedAt() ? "No HTTPS-reachable nodes right now" : "Probing active nodes for HTTPS…"}</div>`}
+        ${items || `<div class="node-menu-empty">${getNodeOptionsUpdatedAt() ? "No active nodes right now" : "Probing active nodes…"}</div>`}
       </div>
     </div>`;
 }
@@ -352,7 +353,7 @@ export function themeInitScript() {
     }
   };
   // The picker only ever offers endpoints the server already validated against
-  // its live HTTPS node cache, so we just hand the choice back as a cookie
+  // its live node cache, so we just hand the choice back as a cookie
   // and reload — nemFetch() on the server then prefers that node for this browser.
   window.selectNode = function(btn) {
     var endpoint = btn.dataset.nodeEndpoint || '';
