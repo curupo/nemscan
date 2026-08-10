@@ -36,15 +36,15 @@ test("renderNodeRow shows an HTTP badge for a protocol:http node", () => {
   assert.match(html, /proto-badge">HTTP<\/span>/);
 });
 
-test("renderNodeRow shows no protocol badge for a protocol:https node", () => {
+test("renderNodeRow shows an HTTPS badge for a protocol:https node", () => {
   const html = renderNodeRow(
     { name: "onlyhttps", host: "onlyhttps:7891", endpoint: "https://onlyhttps:7891", protocol: "https" },
     1,
   );
-  assert.doesNotMatch(html, /proto-badge/);
+  assert.match(html, /proto-badge">HTTPS<\/span>/);
 });
 
-test("nodeSwitchHTML renders exactly one HTTP badge when the pool has one http and one https entry for the same host", async (t) => {
+test("nodeSwitchHTML renders one HTTP badge and one HTTPS badge when the pool has one http and one https entry for the same host", async (t) => {
   t.mock.method(global, "fetch", async (url) => {
     const u = String(url);
     if (u.includes("/chain/height")) {
@@ -57,8 +57,10 @@ test("nodeSwitchHTML renders exactly one HTTP badge when the pool has one http a
   });
   await refreshNodeOptions("mainnet");
   const html = nodeSwitchHTML();
-  const badgeCount = (html.match(/proto-badge">HTTP<\/span>/g) || []).length;
-  assert.equal(badgeCount, 1);
+  const httpBadgeCount = (html.match(/proto-badge">HTTP<\/span>/g) || []).length;
+  const httpsBadgeCount = (html.match(/proto-badge">HTTPS<\/span>/g) || []).length;
+  assert.equal(httpBadgeCount, 1);
+  assert.equal(httpsBadgeCount, 1);
   assert.match(html, /mixed:7890/);
   assert.match(html, /mixed:7891/);
 });

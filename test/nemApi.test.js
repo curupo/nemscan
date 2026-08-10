@@ -1,9 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getTxsFromBlocks, getBlock, getHeight } from "../src/nemApi.js";
-import { refreshNodeOptions, getAutoBestNode } from "../src/nodePool.js";
-import { MAX_BLOCK_SCAN_DEPTH, MAX_BLOCK_SCAN_MS } from "../src/constants.js";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { networkContext, nodeContext } from "../src/context.js";
+
+// nemApi.js now imports db.js (to persist fetched blocks), which opens both
+// SQLite files at import time as a side effect. Point NEMSCAN_DB_DIR at a
+// scratch directory before importing anything that reaches constants.js /
+// db.js, so this test never touches the real cache.db / cache-testnet.db in
+// the repo root (same pattern as test/db.test.js).
+process.env.NEMSCAN_DB_DIR = mkdtempSync(join(tmpdir(), "nemscan-nemapi-test-"));
+
+const { getTxsFromBlocks, getBlock, getHeight } = await import("../src/nemApi.js");
+const { refreshNodeOptions, getAutoBestNode } = await import("../src/nodePool.js");
+const { MAX_BLOCK_SCAN_DEPTH, MAX_BLOCK_SCAN_MS } = await import("../src/constants.js");
+const { getCachedBlock, upsertBlock } = await import("../src/db.js");
 
 // Builds a mock global.fetch that answers POST /block/at/public with a
 // synthetic block for whatever height was requested. `hasTx(height)`
@@ -274,4 +286,43 @@ test("nemFetch does not demote autoBestNode when the failing node was the user's
     autoBestBefore,
     "an explicit preferred node's failure must never touch the autoBestNode pin",
   );
+});
+
+test("getBlock reads from sqlite before making a live fetch", async (t) => {
+  let fetchCalled = false;
+  t.mock.method(global, "fetch", async () => {
+    fetchCalled = true;
+    return { ok: true, json: async () => ({ timeStamp: 0, transactions: [] }) };
+  });
+
+  const height = 42_000;
+  await networkContext.run("mainnet", async () => {
+    upsertBlock(
+      height,
+      555,
+      JSON.stringify({ height, timeStamp: 555, transactions: [], fromDb: true }),
+    );
+    const block = await getBlock(height);
+    assert.equal(block.fromDb, true);
+    assert.equal(
+      fetchCalled,
+      false,
+      "expected the sqlite-cached block to be used instead of a live fetch",
+    );
+  });
+});
+
+test("getBlock writes a live-fetched block through to sqlite", async (t) => {
+  t.mock.method(global, "fetch", async (url, opts) => {
+    const { height } = JSON.parse(opts.body);
+    return { ok: true, json: async () => ({ height, timeStamp: 777, transactions: [] }) };
+  });
+
+  const height = 42_001;
+  await networkContext.run("mainnet", async () => {
+    await getBlock(height);
+    const persisted = getCachedBlock(height);
+    assert.ok(persisted, "expected the live-fetched block to be persisted to sqlite");
+    assert.equal(persisted.timeStamp, 777);
+  });
 });

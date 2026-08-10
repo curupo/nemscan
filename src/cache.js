@@ -9,13 +9,13 @@ import {
   getCachedRichListCount,
   getCachedRichList,
   bumpDailyTxCount,
-  getOldestDailyTxDate,
   upsertNamespace,
   upsertNamespaceArchive,
   upsertMosaic,
   upsertMosaicArchive,
   upsertPoll,
   upsertRichListEntry,
+  upsertBlock,
 } from "./db.js";
 import {
   nemFetch,
@@ -26,7 +26,6 @@ import {
 } from "./nemApi.js";
 import { dateKeyFromTs } from "./helpers.js";
 import {
-  DAILY_TX_DAYS,
   DAILY_TX_BACKFILL_CHUNK,
   ARCHIVE_PAGE_DELAY_MS,
   DEEP_REFRESH_BATCH_DELAY_MS,
@@ -497,14 +496,18 @@ export async function refreshPriceCache() {
   }
 }
 
-// ── Daily TX stats ────────────────────────────────────────────────────────────
+// ── Daily TX stats + block persistence ──────────────────────────────────────
 
 // NIS1 has no endpoint for historical transaction counts, so we derive them
 // ourselves by walking blocks one at a time and bucketing each block's
-// transaction count by its UTC calendar date. A full DAILY_TX_DAYS window is
-// far too many blocks to fetch in one pass, so each call advances the scanned
-// range a little (forward to pick up new blocks, backward to backfill older
-// days) and persists progress in cache_meta so it resumes across restarts.
+// transaction count by its UTC calendar date. The full chain is far too many
+// blocks to fetch in one pass, so each call advances the scanned range a
+// little (forward to pick up new blocks, backward to backfill older ones)
+// and persists progress in cache_meta so it resumes across restarts. Each
+// fetched block is also persisted to the `blocks` table (see db.js) as a
+// side effect, at no extra node-request cost — this is what lets /txs,
+// /blocks, and /block/:height stop live-scanning the chain on every request
+// once a given range has been synced (see getBlock() in nemApi.js).
 export async function scanBlockHeightsForDailyTx(heights) {
   const BATCH = 10;
   for (let i = 0; i < heights.length; i += BATCH) {
@@ -518,6 +521,11 @@ export async function scanBlockHeightsForDailyTx(heights) {
         dateKeyFromTs(block.timeStamp),
         (block.transactions || []).length,
       );
+      try {
+        upsertBlock(block.height, block.timeStamp, JSON.stringify(block));
+      } catch (err) {
+        console.error("Block persistence failed:", err.message);
+      }
     }
     if (i + BATCH < heights.length)
       await new Promise((r) => setTimeout(r, ARCHIVE_PAGE_DELAY_MS));
@@ -546,13 +554,16 @@ export async function refreshDailyTxStats(network) {
         setCacheMeta("daily_tx_scan_max_height", maxH);
       }
 
-      if (!getCacheMeta("daily_tx_backfill_done")) {
-        const cutoff = new Date(Date.now() - (DAILY_TX_DAYS - 1) * 86400000)
-          .toISOString()
-          .slice(0, 10);
-        const oldest = getOldestDailyTxDate();
-        if ((oldest && oldest <= cutoff) || minH <= 1) {
-          setCacheMeta("daily_tx_backfill_done", "1");
+      // Unlike the daily-tx chart (which only ever needed DAILY_TX_DAYS of
+      // history), block persistence backfills all the way to genesis so
+      // /txs, /blocks, and /block/:height can eventually serve any height
+      // from sqlite. This uses its own cache_meta key rather than reusing
+      // the old 7-day "daily_tx_backfill_done" concept, so that a
+      // deployment which already reached the old 7-day mark doesn't get
+      // misread as having finished a full genesis backfill it never ran.
+      if (!getCacheMeta("blocks_backfill_done")) {
+        if (minH <= 1) {
+          setCacheMeta("blocks_backfill_done", "1");
         } else {
           const to = Math.max(1, minH - DAILY_TX_BACKFILL_CHUNK);
           const heights = [];
@@ -571,13 +582,16 @@ export async function refreshDailyTxStats(network) {
 }
 
 // Self-rescheduling rather than setInterval: backfill runs in quick
-// succession (every 5s) until DAILY_TX_DAYS of history is covered, then
-// settles into an infrequent catch-up poll (every 5min). Takes `network`
-// explicitly and passes it through its own recursive setTimeout call.
+// succession (every 5s) until the full chain has been backfilled down to
+// genesis (blocks_backfill_done), then settles into an infrequent catch-up
+// poll (every 5min) that still keeps up with new blocks every cycle. At
+// current mainnet chain length (~5.8M blocks), full genesis backfill takes
+// on the order of days at this pace. Takes `network` explicitly and passes
+// it through its own recursive setTimeout call.
 export function scheduleDailyTxStatsRefresh(network) {
   refreshDailyTxStats(network).finally(() => {
     const delay = networkContext.run(network, () =>
-      getCacheMeta("daily_tx_backfill_done"),
+      getCacheMeta("blocks_backfill_done"),
     )
       ? 5 * 60 * 1000
       : 5 * 1000;

@@ -11,6 +11,7 @@ import {
   MAX_BLOCK_SCAN_DEPTH,
   MAX_BLOCK_SCAN_MS,
 } from "./constants.js";
+import { getCachedBlock, upsertBlock } from "./db.js";
 
 // ── Core fetch ────────────────────────────────────────────────────────────────
 
@@ -132,8 +133,18 @@ export async function fetchBlockRaw(height) {
 export async function getBlock(height) {
   const key = `${currentNetwork()}:${height}`;
   if (blockCache.has(key)) return blockCache.get(key);
+  const cached = getCachedBlock(height);
+  if (cached) {
+    blockCache.set(key, cached);
+    return cached;
+  }
   const block = await fetchBlockRaw(height);
   blockCache.set(key, block);
+  try {
+    upsertBlock(height, block.timeStamp, JSON.stringify(block));
+  } catch (err) {
+    console.error("Block persistence failed:", err.message);
+  }
   if (blockCache.size > BLOCK_CACHE_MAX_SIZE)
     blockCache.delete(blockCache.keys().next().value);
   return block;
