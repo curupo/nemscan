@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { globalTxMoreRows, renderNodeRow, nodeSwitchHTML } from "../src/html.js";
+import { globalTxMoreRows, renderNodeRow, nodeSwitchHTML, nodesListHTML } from "../src/html.js";
 import { refreshNodeOptions } from "../src/nodePool.js";
 
 test("globalTxMoreRows keeps the Load More control when a scan window finds zero txs but the chain isn't exhausted", () => {
@@ -30,7 +30,7 @@ test("globalTxMoreRows drops the Load More control once the chain is exhausted",
 
 test("renderNodeRow shows an HTTP badge for a protocol:http node", () => {
   const html = renderNodeRow(
-    { name: "onlyhttp", host: "onlyhttp:7890", endpoint: "http://onlyhttp:7890", protocol: "http" },
+    [{ name: "onlyhttp", host: "onlyhttp:7890", endpoint: "http://onlyhttp:7890", protocol: "http" }],
     1,
   );
   assert.match(html, /proto-badge">HTTP<\/span>/);
@@ -38,10 +38,35 @@ test("renderNodeRow shows an HTTP badge for a protocol:http node", () => {
 
 test("renderNodeRow shows an HTTPS badge for a protocol:https node", () => {
   const html = renderNodeRow(
-    { name: "onlyhttps", host: "onlyhttps:7891", endpoint: "https://onlyhttps:7891", protocol: "https" },
+    [{ name: "onlyhttps", host: "onlyhttps:7891", endpoint: "https://onlyhttps:7891", protocol: "https" }],
     1,
   );
   assert.match(html, /proto-badge">HTTPS<\/span>/);
+});
+
+test("renderNodeRow merges http and https variants of the same host into one row with both badges", () => {
+  const html = renderNodeRow(
+    [
+      { name: "mixed", host: "mixed:7891", endpoint: "https://mixed:7891", protocol: "https" },
+      { name: "mixed", host: "mixed:7890", endpoint: "http://mixed:7890", protocol: "http" },
+    ],
+    1,
+  );
+  assert.match(html, /proto-badge">HTTPS<\/span>/);
+  assert.match(html, /proto-badge">HTTP<\/span>/);
+  assert.equal((html.match(/<tr>/g) || []).length, 1);
+});
+
+test("nodesListHTML groups the same host's http and https entries into a single row", () => {
+  const html = nodesListHTML(
+    [
+      { name: "mixed", host: "mixed:7891", endpoint: "https://mixed:7891", protocol: "https" },
+      { name: "mixed", host: "mixed:7890", endpoint: "http://mixed:7890", protocol: "http" },
+    ],
+    true,
+  );
+  assert.match(html, /<strong>1<\/strong> active/);
+  assert.equal((html.match(/td-num/g) || []).length, 1);
 });
 
 test("nodeSwitchHTML renders one HTTP badge and one HTTPS badge when the pool has one http and one https entry for the same host", async (t) => {
