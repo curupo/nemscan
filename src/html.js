@@ -113,7 +113,7 @@ export function nodeSwitchHTML() {
         <div class="node-menu-head">Connect via <span class="node-menu-note">active nodes</span></div>
         <button type="button" class="node-menu-item${isActive("")}" data-node-endpoint="" data-node-name="Auto" role="menuitem" onclick="selectNode(this)">
           <span class="node-menu-dot"></span>
-          <span class="node-menu-text"><span class="node-menu-name">Auto</span><span class="node-menu-sub">randomized node pool</span></span>
+          <span class="node-menu-text"><span class="node-menu-name">Auto</span><span class="node-menu-sub">fastest available node</span></span>
         </button>
         <div class="node-menu-sep"></div>
         ${items || `<div class="node-menu-empty">${getNodeOptionsUpdatedAt() ? "No active nodes right now" : "Probing active nodes…"}</div>`}

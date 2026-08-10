@@ -62,3 +62,9 @@ test("nodeSwitchHTML renders exactly one HTTP badge when the pool has one http a
   assert.match(html, /mixed:7890/);
   assert.match(html, /mixed:7891/);
 });
+
+test("nodeSwitchHTML describes Auto as picking the fastest node, not a random one", () => {
+  const html = nodeSwitchHTML();
+  assert.match(html, /fastest available node/);
+  assert.doesNotMatch(html, /randomized node pool/);
+});
