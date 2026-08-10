@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getTxsFromBlocks, getBlock } from "../src/nemApi.js";
+import { getTxsFromBlocks, getBlock, getHeight } from "../src/nemApi.js";
+import { refreshNodeOptions } from "../src/nodePool.js";
 import { MAX_BLOCK_SCAN_DEPTH, MAX_BLOCK_SCAN_MS } from "../src/constants.js";
 import { networkContext } from "../src/context.js";
 
@@ -104,4 +105,40 @@ test("getBlock caches mainnet and testnet separately for the same height (no cro
   const mainnetAgain = await networkContext.run("mainnet", () => getBlock(height));
   assert.equal(calls, 2, "expected the second mainnet call to be served from cache");
   assert.deepEqual(mainnetAgain, mainnetBlock);
+});
+
+test("nemFetch tries the auto-selected fastest node first when no preferred node is set", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  // Both refreshNodeOptions' probes and the later getHeight() call hit the
+  // exact same `{endpoint}/chain/height` URL shape, so a `probing` flag
+  // (not URL content) is what tells the mock which phase it's in.
+  let probing = true;
+  const requestedUrls = [];
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      if (probing) {
+        t.mock.timers.tick(u.includes("fast") ? 10 : 500);
+        return { ok: true, json: async () => ({ height: 1 }) };
+      }
+      requestedUrls.push(u);
+      return { ok: true, json: async () => ({ height: 999 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [
+        { endpoint: "http://fast:7890", name: "fast" },
+        { endpoint: "http://slowpoke:7890", name: "slowpoke" },
+      ],
+    };
+  });
+
+  await refreshNodeOptions("mainnet", 1);
+  probing = false;
+
+  const height = await getHeight();
+
+  assert.equal(height, 999);
+  assert.equal(requestedUrls.length, 1, "expected the fastest node to answer on the first attempt");
+  assert.match(requestedUrls[0], /^https:\/\/fast:7891\//);
 });
