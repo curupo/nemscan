@@ -109,15 +109,15 @@ export async function refreshNodeOptions(network = currentNetwork(), batchSize =
       const httpsHost = `${u.hostname}:${httpsPort}`;
       candidates.push({
         name: n.name || u.hostname,
-        host: httpsHost,
-        endpoint: `https://${httpsHost}`,
-        protocol: "https",
-      });
-      candidates.push({
-        name: n.name || u.hostname,
         host: u.host,
         endpoint: `http://${u.host}`,
         protocol: "http",
+      });
+      candidates.push({
+        name: n.name || u.hostname,
+        host: httpsHost,
+        endpoint: `https://${httpsHost}`,
+        protocol: "https",
       });
     }
     const verified = [];
