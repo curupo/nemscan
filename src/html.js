@@ -21,7 +21,7 @@ import {
   decodeMsg,
 } from "./helpers.js";
 import { nodeContext, currentNetwork } from "./context.js";
-import { getNodeOptions, getNodeOptionsUpdatedAt } from "./nodePool.js";
+import { getNodeOptions, getNodeOptionsUpdatedAt, getAutoBestNode } from "./nodePool.js";
 import { TX_TYPES, XEM_TOTAL_SUPPLY, DAILY_TX_DAYS, NETWORKS } from "./constants.js";
 
 // ── CSS cache-busting version ───────────────────────────────────────────────────────
@@ -89,8 +89,9 @@ function addrFromPubKey(hex) {
 
 export function nodeSwitchHTML() {
   const active = nodeContext.getStore();
+  const autoBest = active ? null : getAutoBestNode();
   const activeEndpoint = active ? active.endpoint : "";
-  const activeLabel = active ? active.name : "Auto";
+  const activeLabel = active ? active.name : autoBest ? `Auto (${autoBest.name})` : "Auto";
   const isActive = (ep) => (ep === activeEndpoint ? " active" : "");
   const items = [...getNodeOptions()]
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -104,7 +105,7 @@ export function nodeSwitchHTML() {
     })
     .join("");
   return `<div class="node-switch">
-      <button type="button" class="node-switch-btn" aria-haspopup="true" aria-expanded="false" onclick="toggleNodeMenu(event)" title="Connection node">
+      <button type="button" class="node-switch-btn" aria-haspopup="true" aria-expanded="false" onclick="toggleNodeMenu(event)" title="${autoBest ? `Connection node — Auto is currently using ${esc(autoBest.name)} (${esc(autoBest.host)})` : "Connection node"}">
         <span class="node-switch-dot is-live"></span>
         <span class="node-switch-label">${esc(activeLabel)}</span>
         <span class="node-switch-caret">&#9662;</span>
@@ -113,7 +114,7 @@ export function nodeSwitchHTML() {
         <div class="node-menu-head">Connect via <span class="node-menu-note">active nodes</span></div>
         <button type="button" class="node-menu-item${isActive("")}" data-node-endpoint="" data-node-name="Auto" role="menuitem" onclick="selectNode(this)">
           <span class="node-menu-dot"></span>
-          <span class="node-menu-text"><span class="node-menu-name">Auto</span><span class="node-menu-sub">fastest available node</span></span>
+          <span class="node-menu-text"><span class="node-menu-name">Auto</span><span class="node-menu-sub">fastest available node${autoBest ? ` — currently <span class="node-menu-sub-host">${esc(autoBest.host)}</span>` : ""}</span></span>
         </button>
         <div class="node-menu-sep"></div>
         ${items || `<div class="node-menu-empty">${getNodeOptionsUpdatedAt() ? "No active nodes right now" : "Probing active nodes…"}</div>`}
@@ -138,7 +139,6 @@ export function networkSwitchHTML() {
         <span class="node-switch-label">${esc(NETWORKS[active].label)}</span>
         <span class="node-switch-caret">&#9662;</span>
       </button>
-      ${active === "testnet" ? '<span class="network-badge">TESTNET</span>' : ""}
       <div class="node-menu" role="menu" aria-label="Network">
         ${items}
       </div>
@@ -239,7 +239,7 @@ export function footerHTML() {
       <div class="footer-col">
         <h4 class="footer-col-title">Community</h4>
         <ul class="footer-col-list">
-          <li><a href="https://github.com/NemProject" target="_blank" rel="noopener">${githubIcon}GitHub</a></li>
+          <li><a href="https://github.com/NemProject/miscellaneous" target="_blank" rel="noopener">${githubIcon}GitHub</a></li>
           <li><a href="https://discord.gg/NMA9YQ55td" target="_blank" rel="noopener">${discordIcon}Discord</a></li>
           <li><a href="https://x.com/NEMofficial" target="_blank" rel="noopener">${xIcon}X (Twitter)</a></li>
           <li><a href="https://symbol-community.com/" target="_blank" rel="noopener">${symbolIcon}Symbol Community</a></li>
@@ -251,7 +251,7 @@ export function footerHTML() {
           <li><a href="https://nem.io" target="_blank" rel="noopener">nem.io</a></li>
           <li><a href="https://nemnodes.org/" target="_blank" rel="noopener">nemnodes.org</a></li>
           <li><a href="https://nem.io/supernodes/" target="_blank" rel="noopener">Supernodes</a></li>
-          <li><a href="https://explorer.nemtool.com/" target="_blank" rel="noopener">explorer.nemtool.com</a></li>
+          <li><a href="https://nem.fyi" target="_blank" rel="noopener">nem.fyi</a></li>
         </ul>
       </div>
       <div class="footer-col">
