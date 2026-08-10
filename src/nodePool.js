@@ -149,6 +149,8 @@ function updateAutoBestNode(s, verified) {
     fastest.latencyMs <= currentFresh.latencyMs - AUTO_BEST_NODE_HYSTERESIS_MS
   ) {
     s.autoBestNode = fastest;
+  } else {
+    s.autoBestNode = currentFresh;
   }
 }
 

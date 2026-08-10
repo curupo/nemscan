@@ -310,3 +310,37 @@ test("refreshNodeOptions forces a switch when the current autoBestNode drops out
   // margin check doesn't apply — must switch anyway.
   assert.equal(getAutoBestNode("mainnet").name, "b");
 });
+
+test("refreshNodeOptions refreshes autoBestNode's latencyMs when the pin is kept (hysteresis)", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  let round = 1;
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      // Round 1: a=100ms, b=400ms → a wins
+      // Round 2: a=120ms, b=400ms → a still wins (not beaten by 150ms margin), but latencyMs must refresh to 120
+      const isNodeA = u.indexOf("://a:") !== -1;
+      const tickAmount = isNodeA ? (round === 1 ? 100 : 120) : 400;
+      t.mock.timers.tick(tickAmount);
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [
+        { endpoint: "http://a:7890", name: "a" },
+        { endpoint: "http://b:7890", name: "b" },
+      ],
+    };
+  });
+  await refreshNodeOptions("mainnet", 1);
+  const after1 = getAutoBestNode("mainnet");
+  assert.equal(after1.name, "a");
+  assert.equal(after1.latencyMs, 100);
+
+  round = 2;
+  await refreshNodeOptions("mainnet", 1);
+  // a is kept (not beaten by the 150ms margin), but its latencyMs must be refreshed to this cycle's measurement (120ms)
+  const after2 = getAutoBestNode("mainnet");
+  assert.equal(after2.name, "a");
+  assert.equal(after2.latencyMs, 120);
+});
