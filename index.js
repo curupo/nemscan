@@ -55,6 +55,7 @@ import {
   shell,
   accountShell,
   homePageHTML,
+  homeContentHTML,
   heroBlocks,
   heroBlock,
   heroTxs,
@@ -142,9 +143,14 @@ app.use((req, res, next) => {
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
-app.get("/", async (req, res) => {
+app.get("/", (req, res) => {
   res.setHeader("Content-Type", "text/html");
   const base = `${req.protocol}://${req.get("host")}`;
+  res.send(homePageHTML({ baseUrl: base }));
+});
+
+app.get("/api/home", async (req, res) => {
+  res.setHeader("Content-Type", "text/html");
   try {
     const height = await getHeight();
     const heights = [height, height - 1, height - 2, height - 3, height - 4];
@@ -156,11 +162,9 @@ app.get("/", async (req, res) => {
         ? (blocks[0].timeStamp - blocks[blocks.length - 1].timeStamp) /
           (blocks.length - 1)
         : null;
-    res.send(
-      homePageHTML({ height, blocks, txs, avgBlockSecs, baseUrl: base }),
-    );
+    res.send(homeContentHTML({ height, blocks, txs, avgBlockSecs }));
   } catch (err) {
-    res.status(503).send(homePageHTML({ error: err.message, baseUrl: base }));
+    res.status(503).send(errorFrag(err.message, "/api/home", "#home-content"));
   }
 });
 
