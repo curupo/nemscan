@@ -231,60 +231,66 @@ test("refreshNodeOptions sets getAutoBestNode to the fastest verified candidate"
 });
 
 test("refreshNodeOptions keeps the current autoBestNode when a new candidate is only marginally faster (hysteresis)", async (t) => {
+  // Unique hostnames (h1a/h1b) so this test's outcome can't be satisfied by
+  // leftover state from another hysteresis test sharing the module-level
+  // autoBestNode singleton — see nodePool.test.js's other "a"/"b"-style
+  // tests, each of which now uses its own h*a/h*b pair for the same reason.
   t.mock.timers.enable({ apis: ["Date"] });
   let round = 1;
   t.mock.method(global, "fetch", async (url) => {
     const u = String(url);
     if (u.includes("/chain/height")) {
-      t.mock.timers.tick(u.includes("://a:") ? 100 : round === 1 ? 400 : 80);
+      t.mock.timers.tick(u.includes("://h1a:") ? 100 : round === 1 ? 400 : 80);
       return { ok: true, json: async () => ({ height: 1 }) };
     }
     return {
       ok: true,
       json: async () => [
-        { endpoint: "http://a:7890", name: "a" },
-        { endpoint: "http://b:7890", name: "b" },
+        { endpoint: "http://h1a:7890", name: "h1a" },
+        { endpoint: "http://h1b:7890", name: "h1b" },
       ],
     };
   });
   await refreshNodeOptions("mainnet", 1);
-  assert.equal(getAutoBestNode("mainnet").name, "a"); // round 1: a=100ms, b=400ms
+  assert.equal(getAutoBestNode("mainnet").name, "h1a"); // round 1: h1a=100ms, h1b=400ms
 
   round = 2;
   await refreshNodeOptions("mainnet", 1);
-  // round 2: a is still 100ms, b improved to 80ms — only 20ms faster than
-  // a's fresh measurement this round, well under the 150ms margin.
-  assert.equal(getAutoBestNode("mainnet").name, "a");
+  // round 2: h1a is still 100ms, h1b improved to 80ms — only 20ms faster
+  // than h1a's fresh measurement this round, well under the 150ms margin.
+  assert.equal(getAutoBestNode("mainnet").name, "h1a");
 });
 
 test("refreshNodeOptions switches autoBestNode once a candidate is faster than the margin", async (t) => {
+  // Unique hostnames (h2a/h2b) — see the note in the hysteresis-kept test above.
   t.mock.timers.enable({ apis: ["Date"] });
   let round = 1;
   t.mock.method(global, "fetch", async (url) => {
     const u = String(url);
     if (u.includes("/chain/height")) {
-      t.mock.timers.tick(u.includes("://a:") ? 300 : round === 1 ? 1000 : 140);
+      t.mock.timers.tick(u.includes("://h2a:") ? 300 : round === 1 ? 1000 : 140);
       return { ok: true, json: async () => ({ height: 1 }) };
     }
     return {
       ok: true,
       json: async () => [
-        { endpoint: "http://a:7890", name: "a" },
-        { endpoint: "http://b:7890", name: "b" },
+        { endpoint: "http://h2a:7890", name: "h2a" },
+        { endpoint: "http://h2b:7890", name: "h2b" },
       ],
     };
   });
   await refreshNodeOptions("mainnet", 1);
-  assert.equal(getAutoBestNode("mainnet").name, "a"); // round 1: a=300ms, b=1000ms
+  assert.equal(getAutoBestNode("mainnet").name, "h2a"); // round 1: h2a=300ms, h2b=1000ms
 
   round = 2;
   await refreshNodeOptions("mainnet", 1);
-  // round 2: a is still 300ms, b improved to 140ms — 160ms faster than a's
-  // fresh measurement this round, over the 150ms margin.
-  assert.equal(getAutoBestNode("mainnet").name, "b");
+  // round 2: h2a is still 300ms, h2b improved to 140ms — 160ms faster than
+  // h2a's fresh measurement this round, over the 150ms margin.
+  assert.equal(getAutoBestNode("mainnet").name, "h2b");
 });
 
 test("refreshNodeOptions forces a switch when the current autoBestNode drops out of the verified pool", async (t) => {
+  // Unique hostnames (h3a/h3b) — see the note in the hysteresis-kept test above.
   t.mock.timers.enable({ apis: ["Date"] });
   let round = 1;
   t.mock.method(global, "fetch", async (url) => {
@@ -297,29 +303,30 @@ test("refreshNodeOptions forces a switch when the current autoBestNode drops out
       ok: true,
       json: async () =>
         round === 1
-          ? [{ endpoint: "http://a:7890", name: "a" }]
-          : [{ endpoint: "http://b:7890", name: "b" }],
+          ? [{ endpoint: "http://h3a:7890", name: "h3a" }]
+          : [{ endpoint: "http://h3b:7890", name: "h3b" }],
     };
   });
   await refreshNodeOptions("mainnet", 1);
-  assert.equal(getAutoBestNode("mainnet").name, "a");
+  assert.equal(getAutoBestNode("mainnet").name, "h3a");
 
-  round = 2; // "a" is no longer reported by nodewatch at all this cycle
+  round = 2; // "h3a" is no longer reported by nodewatch at all this cycle
   await refreshNodeOptions("mainnet", 1);
-  // "b" is much slower (500ms) than "a" ever was, but "a" is gone, so the
-  // margin check doesn't apply — must switch anyway.
-  assert.equal(getAutoBestNode("mainnet").name, "b");
+  // "h3b" is much slower (500ms) than "h3a" ever was, but "h3a" is gone, so
+  // the margin check doesn't apply — must switch anyway.
+  assert.equal(getAutoBestNode("mainnet").name, "h3b");
 });
 
 test("refreshNodeOptions refreshes autoBestNode's latencyMs when the pin is kept (hysteresis)", async (t) => {
+  // Unique hostnames (h4a/h4b) — see the note in the hysteresis-kept test above.
   t.mock.timers.enable({ apis: ["Date"] });
   let round = 1;
   t.mock.method(global, "fetch", async (url) => {
     const u = String(url);
     if (u.includes("/chain/height")) {
-      // Round 1: a=100ms, b=400ms → a wins
-      // Round 2: a=120ms, b=400ms → a still wins (not beaten by 150ms margin), but latencyMs must refresh to 120
-      const isNodeA = u.indexOf("://a:") !== -1;
+      // Round 1: h4a=100ms, h4b=400ms → h4a wins
+      // Round 2: h4a=120ms, h4b=400ms → h4a still wins (not beaten by 150ms margin), but latencyMs must refresh to 120
+      const isNodeA = u.indexOf("://h4a:") !== -1;
       const tickAmount = isNodeA ? (round === 1 ? 100 : 120) : 400;
       t.mock.timers.tick(tickAmount);
       return { ok: true, json: async () => ({ height: 1 }) };
@@ -327,20 +334,20 @@ test("refreshNodeOptions refreshes autoBestNode's latencyMs when the pin is kept
     return {
       ok: true,
       json: async () => [
-        { endpoint: "http://a:7890", name: "a" },
-        { endpoint: "http://b:7890", name: "b" },
+        { endpoint: "http://h4a:7890", name: "h4a" },
+        { endpoint: "http://h4b:7890", name: "h4b" },
       ],
     };
   });
   await refreshNodeOptions("mainnet", 1);
   const after1 = getAutoBestNode("mainnet");
-  assert.equal(after1.name, "a");
+  assert.equal(after1.name, "h4a");
   assert.equal(after1.latencyMs, 100);
 
   round = 2;
   await refreshNodeOptions("mainnet", 1);
-  // a is kept (not beaten by the 150ms margin), but its latencyMs must be refreshed to this cycle's measurement (120ms)
+  // h4a is kept (not beaten by the 150ms margin), but its latencyMs must be refreshed to this cycle's measurement (120ms)
   const after2 = getAutoBestNode("mainnet");
-  assert.equal(after2.name, "a");
+  assert.equal(after2.name, "h4a");
   assert.equal(after2.latencyMs, 120);
 });

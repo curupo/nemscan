@@ -180,9 +180,12 @@ function shuffle(arr) {
 // dynamic, verified pool (HTTPS and HTTP entries mixed together, uniformly
 // shuffled) when it has at least one entry, else that
 // network's hardcoded fallback (cold start, or a sustained nodewatch outage
-// before any successful refresh has ever completed). Called fresh on every
-// nemFetch() so load spreads across nodes instead of always starting from the
-// same one.
+// before any successful refresh has ever completed). Still provides the full
+// shuffle for race mode, and for the sequential path's fallback slots — but
+// the sequential path's primary/first slot in Auto mode no longer comes from
+// here: it's the pinned autoBestNode instead (see getAutoBestNode /
+// updateAutoBestNode above), which stays fixed across calls rather than
+// spreading load on every nemFetch().
 //
 // `nodes` defaults to the live pool for the current network; tests pass an
 // explicit array instead of reaching into this module's internal state.

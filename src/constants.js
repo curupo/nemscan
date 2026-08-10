@@ -69,8 +69,11 @@ export const RATE_LIMIT_RETRY_MS = 1500;
 // a cap, race mode would fan out to all of them per call (multiplying load
 // on the very endpoints this feature exists to protect) and a total-pool
 // outage in sequential mode would take proportionally longer to report as
-// failed. Both paths shuffle before slicing, so repeated calls still spread
-// across the whole pool over time — just fewer nodes per individual call.
+// failed. Race mode is still fully shuffled before slicing, so repeated
+// calls spread across the whole pool over time. The sequential path's first
+// slot is different: in Auto mode (no explicit node picked) it's the pinned
+// autoBestNode (see nodePool.js), not a shuffle result — only the remaining
+// fallback slots are drawn from a fresh shuffle.
 export const RACE_MAX_NODES = 5;
 export const SEQUENTIAL_MAX_NODES = 8;
 
