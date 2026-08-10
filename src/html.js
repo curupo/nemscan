@@ -1789,14 +1789,39 @@ export function mosaicsListHTML(items, updatedAt, limit) {
 
 // ── Nodes list HTML ───────────────────────────────────────────────────────────
 
-export function renderNodeRow(n, num) {
-  const badge = n.protocol ? ` <span class="proto-badge">${esc(n.protocol.toUpperCase())}</span>` : "";
+export function renderNodeRow(variants, num) {
+  const endpoints = variants
+    .map(
+      (n) =>
+        `<a href="${esc(n.endpoint)}/node/info" class="mono-link" target="_blank" rel="noopener">${esc(n.host || n.endpoint)}</a>${n.protocol ? ` <span class="proto-badge">${esc(n.protocol.toUpperCase())}</span>` : ""}`,
+    )
+    .join(" ");
   return `<tr>
     <td class="td-num">${num}</td>
-    <td>${esc(n.name || "\u2014")}</td>
-    <td><div class="node-endpoint-cell"><a href="${esc(n.endpoint)}/node/info" class="mono-link" target="_blank" rel="noopener">${esc(n.host || n.endpoint)}</a>${badge}</div></td>
+    <td>${esc(variants[0].name || "\u2014")}</td>
+    <td><div class="node-endpoint-cell">${endpoints}</div></td>
     <td><span class="status-ok">\u25cf Active</span></td>
   </tr>`;
+}
+
+// Groups the pool's independently-verified http/https candidates back
+// together by hostname so the same physical node isn't listed twice \u2014
+// nodePool.js admits each protocol a host answers on as its own entry (see
+// refreshNodeOptions), which is what the node-switch dropdown wants (users
+// pick an exact endpoint) but is just noise on this page's node count/listing.
+function groupNodesByHost(nodes) {
+  const groups = new Map();
+  for (const n of nodes) {
+    let hostname;
+    try {
+      hostname = new URL(n.endpoint).hostname;
+    } catch {
+      hostname = n.host;
+    }
+    if (!groups.has(hostname)) groups.set(hostname, []);
+    groups.get(hostname).push(n);
+  }
+  return [...groups.values()];
 }
 
 export function nodesListHTML(nodes, probed) {
@@ -1805,15 +1830,16 @@ export function nodesListHTML(nodes, probed) {
       ? `<div class="empty-state">No active nodes found</div>`
       : `<div class="loading" hx-get="/api/nodes" hx-trigger="load delay:3s" hx-target="#nodes-card" hx-swap="innerHTML"><div class="spinner"></div><span>Probing nodes…</span></div>`;
   }
+  const grouped = groupNodesByHost(nodes);
   return `
   <div class="card-head">
     <div class="card-title">Active Nodes <span class="live-pill"><span class="live-dot"></span>Live</span></div>
-    <span class="total-txt"><strong>${nodes.length}</strong> active</span>
+    <span class="total-txt"><strong>${grouped.length}</strong> active</span>
   </div>
   <p class="archive-note"><span class="archive-note-icon">&#9432;</span>The node information on this page is sourced from <a href="https://nodewatch.symbol.tools/" target="_blank" rel="noopener">nodewatch.symbol.tools</a>, a network crawler that lists all discovered NEM nodes, verified here by a live reachability check over HTTPS or HTTP.</p>
   <div class="tbl-wrap"><table>
     <thead><tr><th>#</th><th>Name</th><th>Endpoint</th><th>Status</th></tr></thead>
-    <tbody>${nodes.map((n, i) => renderNodeRow(n, i + 1)).join("")}</tbody>
+    <tbody>${grouped.map((g, i) => renderNodeRow(g, i + 1)).join("")}</tbody>
   </table></div>`;
 }
 
