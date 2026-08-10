@@ -92,19 +92,19 @@ test("getNodeOptions defaults to the current network and mainnet/testnet pools a
   const testnetPool = getNodeOptions("testnet");
   assert.equal(mainnetPool.length, 2);
   assert.equal(testnetPool.length, 2);
-  // refreshNodeOptions pushes the derived HTTPS candidate before the
-  // original HTTP candidate for each nodewatch entry, so with a single
+  // refreshNodeOptions pushes the original HTTP candidate before the
+  // derived HTTPS candidate for each nodewatch entry, so with a single
   // source node per network, pool order is deterministic here.
-  assert.equal(mainnetPool[0].host, "mnode:7891");
-  assert.equal(mainnetPool[0].protocol, "https");
-  assert.equal(mainnetPool[1].host, "mnode:7890");
-  assert.equal(mainnetPool[1].protocol, "http");
-  assert.equal(testnetPool[0].host, "tnode:7891");
-  assert.equal(testnetPool[1].host, "tnode:7890");
+  assert.equal(mainnetPool[0].host, "mnode:7890");
+  assert.equal(mainnetPool[0].protocol, "http");
+  assert.equal(mainnetPool[1].host, "mnode:7891");
+  assert.equal(mainnetPool[1].protocol, "https");
+  assert.equal(testnetPool[0].host, "tnode:7890");
+  assert.equal(testnetPool[1].host, "tnode:7891");
 
   networkContext.run("testnet", () => {
     const pool = getNodeOptions();
-    assert.equal(pool[0].host, "tnode:7891");
+    assert.equal(pool[0].host, "tnode:7890");
   });
 
   assert.ok(getNodeOptionsUpdatedAt("mainnet") !== null);
