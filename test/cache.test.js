@@ -1,7 +1,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fetchXemPriceFromCoinGecko } from "../src/cache.js";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { networkContext } from "../src/context.js";
+
+// cache.js imports db.js, which opens both SQLite files at import time as a
+// side effect. Point NEMSCAN_DB_DIR at a scratch directory before importing
+// anything that reaches constants.js / db.js, so this test never touches the
+// real cache.db / cache-testnet.db in the repo root (same pattern as
+// test/db.test.js and test/nemApi.test.js).
+process.env.NEMSCAN_DB_DIR = mkdtempSync(join(tmpdir(), "nemscan-cache-test-"));
+
+const {
+  fetchXemPriceFromCoinGecko,
+  refreshNamespacesCache,
+  scanBlockHeightsForDailyTx,
+  refreshDailyTxStats,
+} = await import("../src/cache.js");
+const { getCachedBlock, getCacheMeta } = await import("../src/db.js");
 
 function mockFetchOnce(t, jsonBody, ok = true) {
   t.mock.method(global, "fetch", async () => ({
@@ -29,7 +46,6 @@ test("fetchXemPriceFromCoinGecko throws when the HTTP response is not ok", async
 });
 
 test("refreshNamespacesCache guard flag is isolated per network — a slow mainnet refresh doesn't block a concurrent testnet refresh", { timeout: 5000 }, async (t) => {
-  const { refreshNamespacesCache } = await import("../src/cache.js");
   // fetchNamespacesFromNode uses nemFetch's `race: true` mode, which fires
   // every node in the pool in parallel (3 for mainnet, 2 for testnet by
   // default) rather than issuing a single fetch call per refresh. So "the
@@ -65,4 +81,40 @@ test("refreshNamespacesCache guard flag is isolated per network — a slow mainn
 
   pendingMainnetFetches.forEach((resolve) => resolve());
   await mainnetPromise;
+});
+
+test("scanBlockHeightsForDailyTx persists each fetched block to the blocks table", async (t) => {
+  t.mock.method(global, "fetch", async (url, opts) => {
+    const { height } = JSON.parse(opts.body);
+    return { ok: true, json: async () => ({ height, timeStamp: 1000 + height, transactions: [] }) };
+  });
+
+  await networkContext.run("mainnet", async () => {
+    await scanBlockHeightsForDailyTx([100, 101, 102]);
+    assert.deepEqual(getCachedBlock(101), { height: 101, timeStamp: 1101, transactions: [] });
+  });
+});
+
+test("refreshDailyTxStats keeps walking backward past a small window, all the way to genesis, and persists blocks as it goes", async (t) => {
+  t.mock.method(global, "fetch", async (url, opts) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      return { ok: true, json: async () => ({ height: 150 }) };
+    }
+    const { height } = JSON.parse(opts.body);
+    return { ok: true, json: async () => ({ height, timeStamp: height, transactions: [] }) };
+  });
+
+  // DAILY_TX_BACKFILL_CHUNK is 60 blocks per call; a chain height of 150
+  // takes a few sequential calls to walk all the way back to genesis
+  // (height 1). 6 calls is a comfortable margin over the ~4 actually needed.
+  for (let i = 0; i < 6; i++) {
+    await refreshDailyTxStats("mainnet");
+  }
+
+  networkContext.run("mainnet", () => {
+    assert.equal(getCacheMeta("blocks_backfill_done"), "1");
+    assert.ok(getCachedBlock(1), "expected the genesis block to have been persisted");
+    assert.ok(getCachedBlock(150), "expected the chain tip to have been persisted");
+  });
 });

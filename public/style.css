@@ -986,6 +986,12 @@ a {
     margin: 0 auto;
     padding: 20px 24px;
 }
+@media (max-width: 760px) {
+    .container {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+}
 .card {
     background: var(--card);
     border: 1px solid var(--border);

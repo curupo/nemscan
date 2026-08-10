@@ -95,7 +95,7 @@ export function nodeSwitchHTML() {
   const items = [...getNodeOptions()]
     .sort((a, b) => a.name.localeCompare(b.name))
     .map((n) => {
-      const badge = n.protocol === "http" ? ` <span class="proto-badge">HTTP</span>` : "";
+      const badge = n.protocol ? ` <span class="proto-badge">${esc(n.protocol.toUpperCase())}</span>` : "";
       return `
         <button type="button" class="node-menu-item${isActive(n.endpoint)}" data-node-endpoint="${esc(n.endpoint)}" data-node-name="${esc(n.name)}" role="menuitem" onclick="selectNode(this)">
           <span class="node-menu-dot"></span>
@@ -1790,7 +1790,7 @@ export function mosaicsListHTML(items, updatedAt, limit) {
 // ── Nodes list HTML ───────────────────────────────────────────────────────────
 
 export function renderNodeRow(n, num) {
-  const badge = n.protocol === "http" ? ` <span class="proto-badge">HTTP</span>` : "";
+  const badge = n.protocol ? ` <span class="proto-badge">${esc(n.protocol.toUpperCase())}</span>` : "";
   return `<tr>
     <td class="td-num">${num}</td>
     <td>${esc(n.name || "\u2014")}</td>

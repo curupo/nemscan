@@ -12,7 +12,7 @@ import { networkContext } from "../src/context.js";
 // before importing db.js (or constants.js indirectly via db.js).
 process.env.NEMSCAN_DB_DIR = mkdtempSync(join(tmpdir(), "nemscan-db-test-"));
 
-const { setCacheMeta, getCacheMeta } = await import("../src/db.js");
+const { setCacheMeta, getCacheMeta, upsertBlock, getCachedBlock } = await import("../src/db.js");
 
 test("mainnet and testnet DB layers are independent", () => {
   networkContext.run("mainnet", () => {
@@ -31,4 +31,33 @@ test("mainnet and testnet DB layers are independent", () => {
 
 test("outside any networkContext.run, db.js defaults to the mainnet layer", () => {
   assert.equal(getCacheMeta("test_marker"), "mainnet-value");
+});
+
+test("upsertBlock/getCachedBlock round-trips the raw JSON exactly", () => {
+  networkContext.run("mainnet", () => {
+    const raw = { height: 123, timeStamp: 456, transactions: [{ type: 257 }] };
+    upsertBlock(123, 456, JSON.stringify(raw));
+    assert.deepEqual(getCachedBlock(123), raw);
+  });
+});
+
+test("getCachedBlock returns null for a height that was never persisted", () => {
+  networkContext.run("mainnet", () => {
+    assert.equal(getCachedBlock(999_999_999), null);
+  });
+});
+
+test("blocks table is isolated between mainnet and testnet", () => {
+  networkContext.run("mainnet", () => {
+    upsertBlock(500, 111, JSON.stringify({ network: "mainnet" }));
+  });
+  networkContext.run("testnet", () => {
+    upsertBlock(500, 222, JSON.stringify({ network: "testnet" }));
+  });
+  networkContext.run("mainnet", () => {
+    assert.equal(getCachedBlock(500).network, "mainnet");
+  });
+  networkContext.run("testnet", () => {
+    assert.equal(getCachedBlock(500).network, "testnet");
+  });
 });

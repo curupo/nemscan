@@ -62,6 +62,11 @@ function openDbLayer(file) {
       tx_count INTEGER NOT NULL DEFAULT 0,
       block_count INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS blocks (
+      height INTEGER PRIMARY KEY,
+      time_stamp INTEGER NOT NULL,
+      raw TEXT NOT NULL
+    );
   `);
   try {
     db.exec("ALTER TABLE mosaics ADD COLUMN height INTEGER");
@@ -191,8 +196,11 @@ function openDbLayer(file) {
   const _dailyTxRecentStmt = db.prepare(
     "SELECT date, tx_count FROM daily_tx_counts ORDER BY date DESC LIMIT ?",
   );
-  const _dailyTxOldestStmt = db.prepare(
-    "SELECT MIN(date) AS d FROM daily_tx_counts",
+  const _blockUpsertStmt = db.prepare(
+    "INSERT OR REPLACE INTO blocks (height, time_stamp, raw) VALUES (?, ?, ?)",
+  );
+  const _blockSelectStmt = db.prepare(
+    "SELECT raw FROM blocks WHERE height = ?",
   );
 
   return {
@@ -219,7 +227,11 @@ function openDbLayer(file) {
     setCacheMeta: (key, value) => _metaUpsertStmt.run(key, String(value)),
     bumpDailyTxCount: (dateStr, txCount) => _dailyTxBumpStmt.run(dateStr, txCount),
     getDailyTxCounts: (limit) => _dailyTxRecentStmt.all(limit).reverse(),
-    getOldestDailyTxDate: () => _dailyTxOldestStmt.get().d,
+    getCachedBlock: (height) => {
+      const row = _blockSelectStmt.get(height);
+      return row ? JSON.parse(row.raw) : null;
+    },
+    upsertBlock: (height, timeStamp, raw) => _blockUpsertStmt.run(height, timeStamp, raw),
     upsertNamespace: (id, fqn, owner, height) => _nsUpsertStmt.run(id, fqn, owner, height),
     upsertNamespaceArchive: (no, fqn, owner, height) => _nsArchUpsertStmt.run(no, fqn, owner, height),
     upsertMosaic: (id, namespace, name, creator, description, divisibility, supply, transferable, height, timeStamp) =>
@@ -305,8 +317,11 @@ export function bumpDailyTxCount(dateStr, txCount) {
 export function getDailyTxCounts(limit) {
   return layer().getDailyTxCounts(limit);
 }
-export function getOldestDailyTxDate() {
-  return layer().getOldestDailyTxDate();
+export function getCachedBlock(height) {
+  return layer().getCachedBlock(height);
+}
+export function upsertBlock(height, timeStamp, raw) {
+  layer().upsertBlock(height, timeStamp, raw);
 }
 
 // ── Write wrappers (used by cache.js) ─────────────────────────────────────────
