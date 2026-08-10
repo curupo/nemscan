@@ -69,8 +69,11 @@ export const RATE_LIMIT_RETRY_MS = 1500;
 // a cap, race mode would fan out to all of them per call (multiplying load
 // on the very endpoints this feature exists to protect) and a total-pool
 // outage in sequential mode would take proportionally longer to report as
-// failed. Both paths shuffle before slicing, so repeated calls still spread
-// across the whole pool over time — just fewer nodes per individual call.
+// failed. Race mode is still fully shuffled before slicing, so repeated
+// calls spread across the whole pool over time. The sequential path's first
+// slot is different: in Auto mode (no explicit node picked) it's the pinned
+// autoBestNode (see nodePool.js), not a shuffle result — only the remaining
+// fallback slots are drawn from a fresh shuffle.
 export const RACE_MAX_NODES = 5;
 export const SEQUENTIAL_MAX_NODES = 8;
 
@@ -89,8 +92,16 @@ export const ARCHIVE_PAGE_DELAY_MS = 150;
 // Milliseconds to wait between batches during the deep mosaic refresh.
 export const DEEP_REFRESH_BATCH_DELAY_MS = 200;
 
-// Timeout for probing whether a discovered node candidate speaks HTTPS.
+// Timeout for probing whether a discovered node candidate answers on a given protocol.
 export const NODE_PROBE_TIMEOUT_MS = 6000;
+
+// Minimum latency improvement (ms) a new candidate must show over the
+// current autoBestNode's fresh measurement in the same refresh cycle before
+// it replaces it — prevents flapping between near-identical nodes every
+// 5-minute refresh. Does not apply when the current autoBestNode has
+// dropped out of the verified pool entirely (see updateAutoBestNode in
+// nodePool.js), which always replaces immediately.
+export const AUTO_BEST_NODE_HYSTERESIS_MS = 150;
 
 // ── Networks (mainnet / testnet) ────────────────────────────────────────────────
 

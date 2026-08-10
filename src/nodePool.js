@@ -1,4 +1,4 @@
-import { NODE_PROBE_TIMEOUT_MS, NETWORKS } from "./constants.js";
+import { NODE_PROBE_TIMEOUT_MS, AUTO_BEST_NODE_HYSTERESIS_MS, NETWORKS } from "./constants.js";
 import { currentNetwork } from "./context.js";
 
 // ── Node discovery ────────────────────────────────────────────────────────────
@@ -31,38 +31,58 @@ export async function getKnownNemNodes(network) {
   return res.json();
 }
 
-// ── HTTPS node verification ───────────────────────────────────────────────────
+// ── Node verification ─────────────────────────────────────────────────────────
 
-// nodewatch only ever lists each node's plain-HTTP REST endpoint (host:7890);
-// it never lists an "https://" entry. By NIS1 convention the same host
-// commonly answers HTTPS one port up (host:7891 — exactly how our fallback
-// pools in constants.js are configured), so we derive that candidate and probe
-// it directly rather than trusting the registry.
+// nodewatch only ever lists each node's plain-HTTP REST endpoint (host:7890).
+// NIS1 has no protocol requirement, so that endpoint is itself one candidate
+// — and since the same host commonly also answers HTTPS one port up
+// (host:7891, exactly how our fallback pools in constants.js are
+// configured), we derive a second HTTPS candidate. Both are probed and
+// admitted independently: a host can contribute one or two pool entries
+// depending on which protocol(s) it actually answers on.
 const state = {
-  mainnet: { httpsNodeOptions: [], httpsNodeOptionsUpdatedAt: null, refreshing: false },
-  testnet: { httpsNodeOptions: [], httpsNodeOptionsUpdatedAt: null, refreshing: false },
+  mainnet: { nodeOptions: [], nodeOptionsUpdatedAt: null, refreshing: false, autoBestNode: null },
+  testnet: { nodeOptions: [], nodeOptionsUpdatedAt: null, refreshing: false, autoBestNode: null },
 };
 
-export function getHttpsNodeOptions(network = currentNetwork()) {
-  return state[network].httpsNodeOptions;
+export function getNodeOptions(network = currentNetwork()) {
+  return state[network].nodeOptions;
 }
 
-export function getHttpsNodeOptionsUpdatedAt(network = currentNetwork()) {
-  return state[network].httpsNodeOptionsUpdatedAt;
+export function getNodeOptionsUpdatedAt(network = currentNetwork()) {
+  return state[network].nodeOptionsUpdatedAt;
 }
 
-export async function probeHttpsNode(host, timeoutMs = NODE_PROBE_TIMEOUT_MS) {
+export function getAutoBestNode(network = currentNetwork()) {
+  return state[network].autoBestNode;
+}
+
+// Called by nemFetch() when the auto-selected node fails a real request.
+// Only clears the pin if it's still the same node that failed (a refresh
+// may have already re-elected a different one in the meantime) — never
+// touches an explicitly user-selected node, since nemFetch() only calls
+// this for the autoBest-sourced attempt, never the preferred one.
+export function demoteAutoBestNode(endpoint, network = currentNetwork()) {
+  const s = state[network];
+  if (s.autoBestNode && s.autoBestNode.endpoint === endpoint) {
+    s.autoBestNode = null;
+  }
+}
+
+export async function probeNode(url, timeoutMs = NODE_PROBE_TIMEOUT_MS) {
+  const startedAt = Date.now();
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(`https://${host}/chain/height`, {
+    const res = await fetch(`${url}/chain/height`, {
       signal: ctrl.signal,
     });
-    if (!res.ok) return false;
+    if (!res.ok) return { ok: false, latencyMs: null };
     const data = await res.json();
-    return Number.isFinite(data?.height);
+    const ok = Number.isFinite(data?.height);
+    return { ok, latencyMs: ok ? Date.now() - startedAt : null };
   } catch {
-    return false;
+    return { ok: false, latencyMs: null };
   } finally {
     clearTimeout(t);
   }
@@ -70,7 +90,7 @@ export async function probeHttpsNode(host, timeoutMs = NODE_PROBE_TIMEOUT_MS) {
 
 // Refreshed on the same 5-minute cadence as the rest of the "live" data
 // (see index.js's setInterval calls) — once per network.
-export async function refreshHttpsNodeOptions(network = currentNetwork(), batchSize = 12) {
+export async function refreshNodeOptions(network = currentNetwork(), batchSize = 12) {
   const s = state[network];
   if (s.refreshing) return;
   s.refreshing = true;
@@ -86,34 +106,64 @@ export async function refreshHttpsNodeOptions(network = currentNetwork(), batchS
       }
       if (isPrivateHostname(u.hostname)) continue;
       const httpsPort = u.port ? String(Number(u.port) + 1) : "443";
-      const host = `${u.hostname}:${httpsPort}`;
+      const httpsHost = `${u.hostname}:${httpsPort}`;
       candidates.push({
         name: n.name || u.hostname,
-        host,
-        endpoint: `https://${host}`,
+        host: httpsHost,
+        endpoint: `https://${httpsHost}`,
+        protocol: "https",
+      });
+      candidates.push({
+        name: n.name || u.hostname,
+        host: u.host,
+        endpoint: `http://${u.host}`,
+        protocol: "http",
       });
     }
     const verified = [];
     for (let i = 0; i < candidates.length; i += batchSize) {
       const batch = candidates.slice(i, i + batchSize);
-      const ok = await Promise.all(batch.map((c) => probeHttpsNode(c.host)));
+      const results = await Promise.all(batch.map((c) => probeNode(c.endpoint)));
       batch.forEach((c, idx) => {
-        if (ok[idx]) verified.push(c);
+        if (results[idx].ok) verified.push({ ...c, latencyMs: results[idx].latencyMs });
       });
     }
     if (verified.length > 0) {
-      s.httpsNodeOptions = verified;
+      s.nodeOptions = verified;
+      updateAutoBestNode(s, verified);
     }
   } catch (err) {
     console.error(`Node options refresh failed (${network}):`, err.message);
   } finally {
-    s.httpsNodeOptionsUpdatedAt = Date.now();
+    s.nodeOptionsUpdatedAt = Date.now();
     s.refreshing = false;
   }
 }
 
 export function findNodeOption(endpoint, network = currentNetwork()) {
-  return state[network].httpsNodeOptions.find((n) => n.endpoint === endpoint) || null;
+  return state[network].nodeOptions.find((n) => n.endpoint === endpoint) || null;
+}
+
+// Picks the fastest verified candidate and only lets it replace the current
+// autoBestNode if it's a decisive improvement (or the current one is gone
+// entirely) — see AUTO_BEST_NODE_HYSTERESIS_MS.
+function updateAutoBestNode(s, verified) {
+  const fastest = verified.reduce(
+    (best, n) => (!best || n.latencyMs < best.latencyMs ? n : best),
+    null,
+  );
+  const current = s.autoBestNode;
+  const currentFresh = current
+    ? verified.find((n) => n.endpoint === current.endpoint)
+    : null;
+  if (
+    !currentFresh ||
+    fastest.latencyMs <= currentFresh.latencyMs - AUTO_BEST_NODE_HYSTERESIS_MS
+  ) {
+    s.autoBestNode = fastest;
+  } else {
+    s.autoBestNode = currentFresh;
+  }
 }
 
 // ── Shuffled pool for nemFetch ────────────────────────────────────────────────
@@ -127,16 +177,20 @@ function shuffle(arr) {
 }
 
 // Returns a freshly shuffled copy of the current network's node pool: the
-// dynamic, HTTPS-verified pool when it has at least one entry, else that
+// dynamic, verified pool (HTTPS and HTTP entries mixed together, uniformly
+// shuffled) when it has at least one entry, else that
 // network's hardcoded fallback (cold start, or a sustained nodewatch outage
-// before any successful refresh has ever completed). Called fresh on every
-// nemFetch() so load spreads across nodes instead of always starting from the
-// same one.
+// before any successful refresh has ever completed). Still provides the full
+// shuffle for race mode, and for the sequential path's fallback slots — but
+// the sequential path's primary/first slot in Auto mode no longer comes from
+// here: it's the pinned autoBestNode instead (see getAutoBestNode /
+// updateAutoBestNode above), which stays fixed across calls rather than
+// spreading load on every nemFetch().
 //
 // `nodes` defaults to the live pool for the current network; tests pass an
 // explicit array instead of reaching into this module's internal state.
 export function getShuffledNodePool(
-  nodes = getHttpsNodeOptions(),
+  nodes = getNodeOptions(),
   network = currentNetwork(),
 ) {
   const base =

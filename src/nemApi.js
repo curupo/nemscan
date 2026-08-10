@@ -1,5 +1,5 @@
 import { nodeContext, currentNetwork } from "./context.js";
-import { getShuffledNodePool } from "./nodePool.js";
+import { getShuffledNodePool, getAutoBestNode, demoteAutoBestNode } from "./nodePool.js";
 import {
   blockCache,
   DEFAULT_FETCH_TIMEOUT_MS,
@@ -57,13 +57,18 @@ export async function nemFetch(
     }
   }
 
-  // Sequential: try preferred node first, then fall back through a freshly
-  // shuffled pool so load spreads across nodes instead of always starting
-  // from the same one.
+  // Sequential: try the user's explicit preferred node first if set,
+  // otherwise the auto-selected fastest node (autoBestNode — stays fixed
+  // across calls until the next refresh decisively beats it or it drops out
+  // of the pool, see nodePool.js). Either way, fall back through a freshly
+  // shuffled pool for subsequent attempts so a single dead first choice
+  // doesn't need a second refresh cycle to route around.
   const preferred = nodeContext.getStore();
+  const autoBest = preferred ? null : getAutoBestNode();
+  const primary = preferred?.endpoint || autoBest?.endpoint;
   const shuffled = getShuffledNodePool().slice(0, SEQUENTIAL_MAX_NODES);
-  const pool = preferred
-    ? [preferred.endpoint, ...shuffled.filter((n) => n !== preferred.endpoint)]
+  const pool = primary
+    ? [primary, ...shuffled.filter((n) => n !== primary)]
     : shuffled;
   for (const node of pool) {
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -92,6 +97,18 @@ export async function nemFetch(
         clearTimeout(t);
         break;
       }
+    }
+    // This node exhausted its attempts without succeeding. If it was the
+    // pinned autoBestNode, demote it immediately rather than waiting up to
+    // 5 minutes for the next refreshNodeOptions() cycle to notice — every
+    // Auto-mode call would otherwise keep paying a full failed-attempt cost
+    // against a dead pin until then. Only ever matches on the first
+    // outer-loop iteration: `primary` (which equals autoBest?.endpoint
+    // whenever preferred is unset) is filtered out of the rest of `pool`.
+    // Never fires when an explicit preferred node is set, since autoBest is
+    // null in that case.
+    if (node === autoBest?.endpoint) {
+      demoteAutoBestNode(node);
     }
   }
   throw new Error("All NEM nodes failed");

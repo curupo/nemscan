@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   getShuffledNodePool,
   findNodeOption,
-  getHttpsNodeOptions,
-  getHttpsNodeOptionsUpdatedAt,
-  refreshHttpsNodeOptions,
+  getNodeOptions,
+  getNodeOptionsUpdatedAt,
+  refreshNodeOptions,
+  probeNode,
+  getAutoBestNode,
 } from "../src/nodePool.js";
 import {
   NEM_NODES_FALLBACK,
@@ -65,14 +67,12 @@ test("findNodeOption returns null when no node matches", async () => {
   assert.equal(findNodeOption("https://nonexistent:7891"), null);
 });
 
-test("getHttpsNodeOptions defaults to the current network and mainnet/testnet pools are independent", async (t) => {
+test("getNodeOptions defaults to the current network and mainnet/testnet pools are independent", async (t) => {
   t.mock.method(global, "fetch", async (url) => {
     const u = String(url);
-    // probeHttpsNode makes a second, separate fetch call to /chain/height —
-    // answer that too, so candidates actually verify as healthy and each
-    // network's pool gets populated (a shared/buggy pool would still make
-    // this pass if we only checked that *a* refresh happened, so this test
-    // asserts the resulting pools' actual contents instead).
+    // probeNode makes a second, separate fetch call to /chain/height for
+    // both the HTTPS and HTTP candidate — answer both as healthy, so each
+    // network's pool ends up with one entry per protocol.
     if (u.includes("/chain/height")) {
       return { ok: true, json: async () => ({ height: 12345 }) };
     }
@@ -85,24 +85,269 @@ test("getHttpsNodeOptions defaults to the current network and mainnet/testnet po
           : [{ endpoint: "http://mnode:7890", name: "mnode" }],
     };
   });
-  await refreshHttpsNodeOptions("mainnet");
-  await refreshHttpsNodeOptions("testnet");
+  await refreshNodeOptions("mainnet");
+  await refreshNodeOptions("testnet");
 
-  const mainnetPool = getHttpsNodeOptions("mainnet");
-  const testnetPool = getHttpsNodeOptions("testnet");
-  assert.equal(mainnetPool.length, 1);
-  assert.equal(testnetPool.length, 1);
-  assert.notEqual(mainnetPool[0].endpoint, testnetPool[0].endpoint);
-  // refreshHttpsNodeOptions derives the HTTPS candidate one port up from the
-  // plain-HTTP endpoint nodewatch listed (7890 -> 7891).
+  const mainnetPool = getNodeOptions("mainnet");
+  const testnetPool = getNodeOptions("testnet");
+  assert.equal(mainnetPool.length, 2);
+  assert.equal(testnetPool.length, 2);
+  // refreshNodeOptions pushes the derived HTTPS candidate before the
+  // original HTTP candidate for each nodewatch entry, so with a single
+  // source node per network, pool order is deterministic here.
   assert.equal(mainnetPool[0].host, "mnode:7891");
+  assert.equal(mainnetPool[0].protocol, "https");
+  assert.equal(mainnetPool[1].host, "mnode:7890");
+  assert.equal(mainnetPool[1].protocol, "http");
   assert.equal(testnetPool[0].host, "tnode:7891");
+  assert.equal(testnetPool[1].host, "tnode:7890");
 
   networkContext.run("testnet", () => {
-    const pool = getHttpsNodeOptions();
+    const pool = getNodeOptions();
     assert.equal(pool[0].host, "tnode:7891");
   });
 
-  assert.ok(getHttpsNodeOptionsUpdatedAt("mainnet") !== null);
-  assert.ok(getHttpsNodeOptionsUpdatedAt("testnet") !== null);
+  assert.ok(getNodeOptionsUpdatedAt("mainnet") !== null);
+  assert.ok(getNodeOptionsUpdatedAt("testnet") !== null);
+});
+
+test("refreshNodeOptions admits only the HTTPS candidate when the HTTP endpoint fails its probe", async (t) => {
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.startsWith("https://") && u.includes("/chain/height")) {
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    if (u.startsWith("http://") && u.includes("/chain/height")) {
+      return { ok: false };
+    }
+    return {
+      ok: true,
+      json: async () => [{ endpoint: "http://onlyhttps:7890", name: "onlyhttps" }],
+    };
+  });
+  await refreshNodeOptions("mainnet");
+  const pool = getNodeOptions("mainnet");
+  assert.equal(pool.length, 1);
+  assert.equal(pool[0].protocol, "https");
+  assert.equal(pool[0].host, "onlyhttps:7891");
+});
+
+test("refreshNodeOptions admits only the HTTP candidate when the HTTPS endpoint fails its probe", async (t) => {
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.startsWith("http://") && u.includes("/chain/height")) {
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    if (u.startsWith("https://") && u.includes("/chain/height")) {
+      return { ok: false };
+    }
+    return {
+      ok: true,
+      json: async () => [{ endpoint: "http://onlyhttp:7890", name: "onlyhttp" }],
+    };
+  });
+  await refreshNodeOptions("mainnet");
+  const pool = getNodeOptions("mainnet");
+  assert.equal(pool.length, 1);
+  assert.equal(pool[0].protocol, "http");
+  assert.equal(pool[0].host, "onlyhttp:7890");
+});
+
+test("refreshNodeOptions admits both candidates when a host answers on both protocols", async (t) => {
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [{ endpoint: "http://both:7890", name: "both" }],
+    };
+  });
+  await refreshNodeOptions("mainnet");
+  const pool = getNodeOptions("mainnet");
+  assert.equal(pool.length, 2);
+  assert.deepEqual(pool.map((n) => n.protocol).sort(), ["http", "https"]);
+  assert.ok(pool.some((n) => n.protocol === "http" && n.host === "both:7890"));
+  assert.ok(pool.some((n) => n.protocol === "https" && n.host === "both:7891"));
+});
+
+test("probeNode resolves to { ok: true, latencyMs } measuring elapsed time on success", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  t.mock.method(global, "fetch", async () => {
+    t.mock.timers.tick(42);
+    return { ok: true, json: async () => ({ height: 1 }) };
+  });
+  const result = await probeNode("https://node:7891");
+  assert.equal(result.ok, true);
+  assert.equal(result.latencyMs, 42);
+});
+
+test("probeNode resolves to { ok: false, latencyMs: null } when the response is not ok", async (t) => {
+  t.mock.method(global, "fetch", async () => ({ ok: false }));
+  const result = await probeNode("https://node:7891");
+  assert.deepEqual(result, { ok: false, latencyMs: null });
+});
+
+test("probeNode resolves to { ok: false, latencyMs: null } when the height field isn't finite", async (t) => {
+  t.mock.method(global, "fetch", async () => ({
+    ok: true,
+    json: async () => ({ height: "not a number" }),
+  }));
+  const result = await probeNode("https://node:7891");
+  assert.deepEqual(result, { ok: false, latencyMs: null });
+});
+
+test("probeNode resolves to { ok: false, latencyMs: null } when fetch throws", async (t) => {
+  t.mock.method(global, "fetch", async () => {
+    throw new Error("network error");
+  });
+  const result = await probeNode("https://node:7891");
+  assert.deepEqual(result, { ok: false, latencyMs: null });
+});
+
+test("refreshNodeOptions sets getAutoBestNode to the fastest verified candidate", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      t.mock.timers.tick(u.includes("slow") ? 300 : 50);
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [
+        { endpoint: "http://fast:7890", name: "fast" },
+        { endpoint: "http://slow:7890", name: "slow" },
+      ],
+    };
+  });
+  // batchSize=1 makes probing fully sequential, so the shared fake clock's
+  // ticks aren't interleaved across concurrent probeNode() calls.
+  await refreshNodeOptions("mainnet", 1);
+  const best = getAutoBestNode("mainnet");
+  assert.equal(best.name, "fast");
+  assert.equal(best.latencyMs, 50);
+});
+
+test("refreshNodeOptions keeps the current autoBestNode when a new candidate is only marginally faster (hysteresis)", async (t) => {
+  // Unique hostnames (h1a/h1b) so this test's outcome can't be satisfied by
+  // leftover state from another hysteresis test sharing the module-level
+  // autoBestNode singleton — see nodePool.test.js's other "a"/"b"-style
+  // tests, each of which now uses its own h*a/h*b pair for the same reason.
+  t.mock.timers.enable({ apis: ["Date"] });
+  let round = 1;
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      t.mock.timers.tick(u.includes("://h1a:") ? 100 : round === 1 ? 400 : 80);
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [
+        { endpoint: "http://h1a:7890", name: "h1a" },
+        { endpoint: "http://h1b:7890", name: "h1b" },
+      ],
+    };
+  });
+  await refreshNodeOptions("mainnet", 1);
+  assert.equal(getAutoBestNode("mainnet").name, "h1a"); // round 1: h1a=100ms, h1b=400ms
+
+  round = 2;
+  await refreshNodeOptions("mainnet", 1);
+  // round 2: h1a is still 100ms, h1b improved to 80ms — only 20ms faster
+  // than h1a's fresh measurement this round, well under the 150ms margin.
+  assert.equal(getAutoBestNode("mainnet").name, "h1a");
+});
+
+test("refreshNodeOptions switches autoBestNode once a candidate is faster than the margin", async (t) => {
+  // Unique hostnames (h2a/h2b) — see the note in the hysteresis-kept test above.
+  t.mock.timers.enable({ apis: ["Date"] });
+  let round = 1;
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      t.mock.timers.tick(u.includes("://h2a:") ? 300 : round === 1 ? 1000 : 140);
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [
+        { endpoint: "http://h2a:7890", name: "h2a" },
+        { endpoint: "http://h2b:7890", name: "h2b" },
+      ],
+    };
+  });
+  await refreshNodeOptions("mainnet", 1);
+  assert.equal(getAutoBestNode("mainnet").name, "h2a"); // round 1: h2a=300ms, h2b=1000ms
+
+  round = 2;
+  await refreshNodeOptions("mainnet", 1);
+  // round 2: h2a is still 300ms, h2b improved to 140ms — 160ms faster than
+  // h2a's fresh measurement this round, over the 150ms margin.
+  assert.equal(getAutoBestNode("mainnet").name, "h2b");
+});
+
+test("refreshNodeOptions forces a switch when the current autoBestNode drops out of the verified pool", async (t) => {
+  // Unique hostnames (h3a/h3b) — see the note in the hysteresis-kept test above.
+  t.mock.timers.enable({ apis: ["Date"] });
+  let round = 1;
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      t.mock.timers.tick(round === 1 ? 100 : 500);
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    return {
+      ok: true,
+      json: async () =>
+        round === 1
+          ? [{ endpoint: "http://h3a:7890", name: "h3a" }]
+          : [{ endpoint: "http://h3b:7890", name: "h3b" }],
+    };
+  });
+  await refreshNodeOptions("mainnet", 1);
+  assert.equal(getAutoBestNode("mainnet").name, "h3a");
+
+  round = 2; // "h3a" is no longer reported by nodewatch at all this cycle
+  await refreshNodeOptions("mainnet", 1);
+  // "h3b" is much slower (500ms) than "h3a" ever was, but "h3a" is gone, so
+  // the margin check doesn't apply — must switch anyway.
+  assert.equal(getAutoBestNode("mainnet").name, "h3b");
+});
+
+test("refreshNodeOptions refreshes autoBestNode's latencyMs when the pin is kept (hysteresis)", async (t) => {
+  // Unique hostnames (h4a/h4b) — see the note in the hysteresis-kept test above.
+  t.mock.timers.enable({ apis: ["Date"] });
+  let round = 1;
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      // Round 1: h4a=100ms, h4b=400ms → h4a wins
+      // Round 2: h4a=120ms, h4b=400ms → h4a still wins (not beaten by 150ms margin), but latencyMs must refresh to 120
+      const isNodeA = u.indexOf("://h4a:") !== -1;
+      const tickAmount = isNodeA ? (round === 1 ? 100 : 120) : 400;
+      t.mock.timers.tick(tickAmount);
+      return { ok: true, json: async () => ({ height: 1 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [
+        { endpoint: "http://h4a:7890", name: "h4a" },
+        { endpoint: "http://h4b:7890", name: "h4b" },
+      ],
+    };
+  });
+  await refreshNodeOptions("mainnet", 1);
+  const after1 = getAutoBestNode("mainnet");
+  assert.equal(after1.name, "h4a");
+  assert.equal(after1.latencyMs, 100);
+
+  round = 2;
+  await refreshNodeOptions("mainnet", 1);
+  // h4a is kept (not beaten by the 150ms margin), but its latencyMs must be refreshed to this cycle's measurement (120ms)
+  const after2 = getAutoBestNode("mainnet");
+  assert.equal(after2.name, "h4a");
+  assert.equal(after2.latencyMs, 120);
 });

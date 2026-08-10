@@ -21,7 +21,7 @@ import {
   decodeMsg,
 } from "./helpers.js";
 import { nodeContext, currentNetwork } from "./context.js";
-import { getHttpsNodeOptions, getHttpsNodeOptionsUpdatedAt } from "./nodePool.js";
+import { getNodeOptions, getNodeOptionsUpdatedAt } from "./nodePool.js";
 import { TX_TYPES, XEM_TOTAL_SUPPLY, DAILY_TX_DAYS, NETWORKS } from "./constants.js";
 
 // ── CSS cache-busting version ───────────────────────────────────────────────────────
@@ -92,15 +92,16 @@ export function nodeSwitchHTML() {
   const activeEndpoint = active ? active.endpoint : "";
   const activeLabel = active ? active.name : "Auto";
   const isActive = (ep) => (ep === activeEndpoint ? " active" : "");
-  const items = [...getHttpsNodeOptions()]
+  const items = [...getNodeOptions()]
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map(
-      (n) => `
+    .map((n) => {
+      const badge = n.protocol === "http" ? ` <span class="proto-badge">HTTP</span>` : "";
+      return `
         <button type="button" class="node-menu-item${isActive(n.endpoint)}" data-node-endpoint="${esc(n.endpoint)}" data-node-name="${esc(n.name)}" role="menuitem" onclick="selectNode(this)">
           <span class="node-menu-dot"></span>
-          <span class="node-menu-text"><span class="node-menu-name">${esc(n.name)}</span><span class="node-menu-sub">${esc(n.host)}</span></span>
-        </button>`,
-    )
+          <span class="node-menu-text"><span class="node-menu-name">${esc(n.name)}</span><span class="node-menu-sub"><span class="node-menu-sub-host">${esc(n.host)}</span>${badge}</span></span>
+        </button>`;
+    })
     .join("");
   return `<div class="node-switch">
       <button type="button" class="node-switch-btn" aria-haspopup="true" aria-expanded="false" onclick="toggleNodeMenu(event)" title="Connection node">
@@ -109,13 +110,13 @@ export function nodeSwitchHTML() {
         <span class="node-switch-caret">&#9662;</span>
       </button>
       <div class="node-menu" role="menu" aria-label="Connection node">
-        <div class="node-menu-head">Connect via <span class="node-menu-note">active HTTPS nodes</span></div>
+        <div class="node-menu-head">Connect via <span class="node-menu-note">active nodes</span></div>
         <button type="button" class="node-menu-item${isActive("")}" data-node-endpoint="" data-node-name="Auto" role="menuitem" onclick="selectNode(this)">
           <span class="node-menu-dot"></span>
-          <span class="node-menu-text"><span class="node-menu-name">Auto</span><span class="node-menu-sub">randomized node pool</span></span>
+          <span class="node-menu-text"><span class="node-menu-name">Auto</span><span class="node-menu-sub">fastest available node</span></span>
         </button>
         <div class="node-menu-sep"></div>
-        ${items || `<div class="node-menu-empty">${getHttpsNodeOptionsUpdatedAt() ? "No HTTPS-reachable nodes right now" : "Probing active nodes for HTTPS…"}</div>`}
+        ${items || `<div class="node-menu-empty">${getNodeOptionsUpdatedAt() ? "No active nodes right now" : "Probing active nodes…"}</div>`}
       </div>
     </div>`;
 }
@@ -352,7 +353,7 @@ export function themeInitScript() {
     }
   };
   // The picker only ever offers endpoints the server already validated against
-  // its live HTTPS node cache, so we just hand the choice back as a cookie
+  // its live node cache, so we just hand the choice back as a cookie
   // and reload — nemFetch() on the server then prefers that node for this browser.
   window.selectNode = function(btn) {
     var endpoint = btn.dataset.nodeEndpoint || '';
@@ -1336,7 +1337,13 @@ export function globalTxTableHTML(items, chainHeight, nextFromBlock) {
 }
 
 export function globalTxMoreRows(items, nextFromBlock) {
-  if (!items.length) return "";
+  // Unlike the other *MoreRows helpers, this paginates an open-ended block
+  // scan rather than a fixed, fully-known list: getTxsFromBlocks legitimately
+  // returns items: [] with nextFromBlock >= 1 when a scan batch is capped
+  // before finding a transaction (sparse block range, or a bad node in the
+  // "Auto" pool making getBlock() calls fail). Exhaustion is signalled by
+  // nextFromBlock alone (handled inside globalLoadMoreRow) — an empty batch
+  // must not drop the Load More control, or pagination dead-ends early.
   return (
     items.map(renderGlobalTxRow).join("") + globalLoadMoreRow(nextFromBlock)
   );
@@ -1782,10 +1789,11 @@ export function mosaicsListHTML(items, updatedAt, limit) {
 // ── Nodes list HTML ───────────────────────────────────────────────────────────
 
 export function renderNodeRow(n, num) {
+  const badge = n.protocol === "http" ? ` <span class="proto-badge">HTTP</span>` : "";
   return `<tr>
     <td class="td-num">${num}</td>
     <td>${esc(n.name || "\u2014")}</td>
-    <td><div class="node-endpoint-cell"><a href="${esc(n.endpoint)}/node/info" class="mono-link" target="_blank" rel="noopener">${esc(n.host || n.endpoint)}</a></div></td>
+    <td><div class="node-endpoint-cell"><a href="${esc(n.endpoint)}/node/info" class="mono-link" target="_blank" rel="noopener">${esc(n.host || n.endpoint)}</a>${badge}</div></td>
     <td><span class="status-ok">\u25cf Active</span></td>
   </tr>`;
 }
@@ -1801,7 +1809,7 @@ export function nodesListHTML(nodes, probed) {
     <div class="card-title">Active Nodes <span class="live-pill"><span class="live-dot"></span>Live</span></div>
     <span class="total-txt"><strong>${nodes.length}</strong> active</span>
   </div>
-  <p class="archive-note"><span class="archive-note-icon">&#9432;</span>The node information on this page is sourced from <a href="https://nodewatch.symbol.tools/" target="_blank" rel="noopener">nodewatch.symbol.tools</a>, a network crawler that lists all discovered NEM nodes, verified here by an HTTPS reachability check.</p>
+  <p class="archive-note"><span class="archive-note-icon">&#9432;</span>The node information on this page is sourced from <a href="https://nodewatch.symbol.tools/" target="_blank" rel="noopener">nodewatch.symbol.tools</a>, a network crawler that lists all discovered NEM nodes, verified here by a live reachability check over HTTPS or HTTP.</p>
   <div class="tbl-wrap"><table>
     <thead><tr><th>#</th><th>Name</th><th>Endpoint</th><th>Status</th></tr></thead>
     <tbody>${nodes.map((n, i) => renderNodeRow(n, i + 1)).join("")}</tbody>
