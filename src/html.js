@@ -665,21 +665,20 @@ export function homeTxsPanelHTML(txs) {
   </div>`;
 }
 
-export function homePageHTML({
-  height,
-  blocks,
-  txs,
-  avgBlockSecs,
-  error,
-  baseUrl = "",
-}) {
-  const main = error
-    ? `<div class="error-state"><div class="error-icon">⚠</div><div>${esc(error)}</div></div>`
-    : `${homeStatsHTML(height, avgBlockSecs)}
+// Rendered by /api/home. Split out of homePageHTML so the page shell can be
+// sent immediately (see homePageHTML below) instead of blocking on the same
+// live-node round trips (getHeight + 5x getBlock + a getTxsFromBlocks scan
+// that can itself run up to MAX_BLOCK_SCAN_MS) that every other list page
+// already avoids paying for on the initial response.
+export function homeContentHTML({ height, blocks, txs, avgBlockSecs }) {
+  return `${homeStatsHTML(height, avgBlockSecs)}
   <div class="home-panels">
     ${homeBlocksPanelHTML(blocks)}
     ${homeTxsPanelHTML(txs)}
   </div>`;
+}
+
+export function homePageHTML({ baseUrl = "" } = {}) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -704,7 +703,9 @@ export function homePageHTML({
 ${navHTML("/", true)}
 ${homeHeroHTML()}
 <div class="container">
-  ${main}
+  <div id="home-content" hx-get="/api/home" hx-trigger="load" hx-target="#home-content" hx-swap="innerHTML">
+    <div class="loading"><div class="spinner"></div><span>Fetching latest activity…</span></div>
+  </div>
 </div>
 ${footerHTML()}
 </body></html>`;
