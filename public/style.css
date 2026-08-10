@@ -520,18 +520,6 @@ a {
     align-items: center;
     gap: 6px;
 }
-.network-badge {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    color: #fff;
-    background: var(--red);
-    border-radius: 5px;
-    padding: 3px 6px;
-    line-height: 1;
-    white-space: nowrap;
-}
-
 .proto-badge {
     font-size: 10px;
     font-weight: 700;
