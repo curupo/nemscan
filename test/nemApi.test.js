@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getTxsFromBlocks, getBlock, getHeight } from "../src/nemApi.js";
-import { refreshNodeOptions } from "../src/nodePool.js";
+import { refreshNodeOptions, getAutoBestNode } from "../src/nodePool.js";
 import { MAX_BLOCK_SCAN_DEPTH, MAX_BLOCK_SCAN_MS } from "../src/constants.js";
-import { networkContext } from "../src/context.js";
+import { networkContext, nodeContext } from "../src/context.js";
 
 // Builds a mock global.fetch that answers POST /block/at/public with a
 // synthetic block for whatever height was requested. `hasTx(height)`
@@ -140,5 +140,138 @@ test("nemFetch tries the auto-selected fastest node first when no preferred node
 
   assert.equal(height, 999);
   assert.equal(requestedUrls.length, 1, "expected the fastest node to answer on the first attempt");
-  assert.match(requestedUrls[0], /^https:\/\/fast:7891\//);
+  // Intentionally protocol-agnostic: both the https-derived and original
+  // http "fast" candidates tick the same latency, so which variant wins the
+  // reduce() tie-break is an implementation detail (first-seen wins) rather
+  // than something this test cares about — the intent is "the fastest-named
+  // node wins," not "specifically the https variant."
+  assert.match(requestedUrls[0], /^https?:\/\/fast:789[01]\//);
+});
+
+test("nemFetch prefers an explicit preferred node over a populated autoBestNode", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  let probing = true;
+  const requestedUrls = [];
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      if (probing) {
+        t.mock.timers.tick(u.includes("fast") ? 10 : 500);
+        return { ok: true, json: async () => ({ height: 1 }) };
+      }
+      requestedUrls.push(u);
+      if (u.startsWith("https://explicit:7891")) {
+        return { ok: true, json: async () => ({ height: 999 }) };
+      }
+      return { ok: false };
+    }
+    return {
+      ok: true,
+      json: async () => [
+        { endpoint: "http://fast:7890", name: "fast" },
+        { endpoint: "http://slowpoke:7890", name: "slowpoke" },
+      ],
+    };
+  });
+
+  await refreshNodeOptions("mainnet", 1);
+  probing = false;
+  assert.ok(getAutoBestNode("mainnet"), "expected autoBestNode to be populated before the request");
+
+  const height = await nodeContext.run(
+    { endpoint: "https://explicit:7891", name: "explicit" },
+    () => getHeight(),
+  );
+
+  assert.equal(height, 999);
+  assert.equal(requestedUrls.length, 1, "expected the explicit preferred node to answer on the first attempt");
+  assert.match(requestedUrls[0], /^https:\/\/explicit:7891\//);
+});
+
+test("nemFetch demotes the auto-selected node when it fails a request, and falls back to the shuffled pool", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  let probing = true;
+  let failingEndpoint;
+  const requestedUrls = [];
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      if (probing) {
+        t.mock.timers.tick(u.includes("fast") ? 10 : 500);
+        return { ok: true, json: async () => ({ height: 1 }) };
+      }
+      requestedUrls.push(u);
+      if (u.startsWith(failingEndpoint)) {
+        return { ok: false };
+      }
+      return { ok: true, json: async () => ({ height: 999 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [
+        { endpoint: "http://fast:7890", name: "fast" },
+        { endpoint: "http://slowpoke:7890", name: "slowpoke" },
+      ],
+    };
+  });
+
+  await refreshNodeOptions("mainnet", 1);
+  probing = false;
+  failingEndpoint = getAutoBestNode("mainnet").endpoint;
+
+  const height = await getHeight();
+
+  assert.equal(height, 999, "expected the sequential path to fall back to the rest of the pool");
+  assert.equal(requestedUrls.length, 2, "expected exactly one failed attempt against the dead pin, then one success");
+  assert.ok(
+    requestedUrls[0].startsWith(failingEndpoint),
+    "expected the pinned autoBestNode to be tried first",
+  );
+  assert.equal(
+    getAutoBestNode("mainnet"),
+    null,
+    "expected the dead autoBestNode to be demoted after its failed request",
+  );
+});
+
+test("nemFetch does not demote autoBestNode when the failing node was the user's explicit preferred node", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"] });
+  let probing = true;
+  t.mock.method(global, "fetch", async (url) => {
+    const u = String(url);
+    if (u.includes("/chain/height")) {
+      if (probing) {
+        t.mock.timers.tick(u.includes("fast") ? 10 : 500);
+        return { ok: true, json: async () => ({ height: 1 }) };
+      }
+      if (u.startsWith("https://explicit:7891")) {
+        return { ok: false };
+      }
+      return { ok: true, json: async () => ({ height: 999 }) };
+    }
+    return {
+      ok: true,
+      json: async () => [
+        { endpoint: "http://fast:7890", name: "fast" },
+        { endpoint: "http://slowpoke:7890", name: "slowpoke" },
+      ],
+    };
+  });
+
+  await refreshNodeOptions("mainnet", 1);
+  probing = false;
+  const autoBestBefore = getAutoBestNode("mainnet");
+  assert.ok(autoBestBefore, "expected autoBestNode to be populated before the request");
+
+  const height = await nodeContext.run(
+    { endpoint: "https://explicit:7891", name: "explicit" },
+    () => getHeight(),
+  );
+
+  assert.equal(height, 999, "expected fallback through the shuffled pool to succeed");
+  assert.deepEqual(
+    getAutoBestNode("mainnet"),
+    autoBestBefore,
+    "an explicit preferred node's failure must never touch the autoBestNode pin",
+  );
 });

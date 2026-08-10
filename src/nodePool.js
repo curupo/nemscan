@@ -57,6 +57,18 @@ export function getAutoBestNode(network = currentNetwork()) {
   return state[network].autoBestNode;
 }
 
+// Called by nemFetch() when the auto-selected node fails a real request.
+// Only clears the pin if it's still the same node that failed (a refresh
+// may have already re-elected a different one in the meantime) — never
+// touches an explicitly user-selected node, since nemFetch() only calls
+// this for the autoBest-sourced attempt, never the preferred one.
+export function demoteAutoBestNode(endpoint, network = currentNetwork()) {
+  const s = state[network];
+  if (s.autoBestNode && s.autoBestNode.endpoint === endpoint) {
+    s.autoBestNode = null;
+  }
+}
+
 export async function probeNode(url, timeoutMs = NODE_PROBE_TIMEOUT_MS) {
   const startedAt = Date.now();
   const ctrl = new AbortController();

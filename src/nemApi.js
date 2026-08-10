@@ -1,5 +1,5 @@
 import { nodeContext, currentNetwork } from "./context.js";
-import { getShuffledNodePool, getAutoBestNode } from "./nodePool.js";
+import { getShuffledNodePool, getAutoBestNode, demoteAutoBestNode } from "./nodePool.js";
 import {
   blockCache,
   DEFAULT_FETCH_TIMEOUT_MS,
@@ -97,6 +97,18 @@ export async function nemFetch(
         clearTimeout(t);
         break;
       }
+    }
+    // This node exhausted its attempts without succeeding. If it was the
+    // pinned autoBestNode, demote it immediately rather than waiting up to
+    // 5 minutes for the next refreshNodeOptions() cycle to notice — every
+    // Auto-mode call would otherwise keep paying a full failed-attempt cost
+    // against a dead pin until then. Only ever matches on the first
+    // outer-loop iteration: `primary` (which equals autoBest?.endpoint
+    // whenever preferred is unset) is filtered out of the rest of `pool`.
+    // Never fires when an explicit preferred node is set, since autoBest is
+    // null in that case.
+    if (node === autoBest?.endpoint) {
+      demoteAutoBestNode(node);
     }
   }
   throw new Error("All NEM nodes failed");
