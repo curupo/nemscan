@@ -1333,6 +1333,7 @@ tbody tr:hover td {
 .pag-ctrl {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
 }
 .pg-info {
