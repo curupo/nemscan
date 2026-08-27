@@ -1254,7 +1254,7 @@ export function renderTxRow(pair, accountAddress) {
 export function loadMoreRow(txs, address) {
   if (txs.length < 25) return "";
   const lastId = txs[txs.length - 1]?.meta?.id ?? "";
-  return `<tr id="load-more-row"><td colspan="7" class="load-more-cell">
+  return `<tr id="load-more-row"><td colspan="8" class="load-more-cell">
     <button class="load-more-btn"
             hx-get="/api/account/${address}/txs/more?id=${lastId}"
             hx-target="#load-more-row" hx-swap="outerHTML">
@@ -1311,7 +1311,7 @@ export function renderGlobalTxRow(item) {
 
 export function globalLoadMoreRow(nextFromBlock) {
   if (nextFromBlock < 1) return "";
-  return `<tr id="txs-load-more-row"><td colspan="7" class="load-more-cell">
+  return `<tr id="txs-load-more-row"><td colspan="8" class="load-more-cell">
     <button class="load-more-btn"
             hx-get="/api/txs/more?fromBlock=${nextFromBlock}"
             hx-target="#txs-load-more-row" hx-swap="outerHTML">

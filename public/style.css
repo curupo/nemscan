@@ -1198,6 +1198,9 @@ tbody tr:hover td {
     font-size: 13px;
     color: var(--link);
 }
+.blk-link:hover {
+    color: var(--link-h);
+}
 .age-rel {
     font-weight: 500;
 }
