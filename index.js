@@ -689,7 +689,12 @@ app.get("/api/mosaics/more", async (req, res) => {
 // Mosaic Transfer
 app.get("/mosaictransfer", (req, res) => {
   const base = `${req.protocol}://${req.get("host")}`;
-  const parsed = parseMosaicIdQuery(req.query.q);
+  const parsed =
+    parseMosaicIdQuery(req.query.q) ??
+    (() => {
+      const f = mosaicFilterFromQuery(req.query);
+      return f.ns && f.m ? f : null;
+    })();
   const apiQs = parsed
     ? `?ns=${encodeURIComponent(parsed.ns)}&m=${encodeURIComponent(parsed.m)}`
     : "";
@@ -709,6 +714,10 @@ app.get("/mosaictransfer", (req, res) => {
 });
 
 app.get("/api/mosaictransfer", async (req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  if (currentNetwork() === "testnet") {
+    return res.send(unavailableOnTestnetHTML("Mosaic Transfer"));
+  }
   const limit = [10, 25, 50, 100].includes(parseInt(req.query.limit))
     ? parseInt(req.query.limit)
     : 25;
@@ -724,6 +733,10 @@ app.get("/api/mosaictransfer", async (req, res) => {
 });
 
 app.get("/api/mosaictransfer/more", async (req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  if (currentNetwork() === "testnet") {
+    return res.send(unavailableOnTestnetHTML("Mosaic Transfer"));
+  }
   const offset = Math.max(0, parseInt(req.query.offset) || 0);
   const limit = [10, 25, 50, 100].includes(parseInt(req.query.limit))
     ? parseInt(req.query.limit)
@@ -940,6 +953,7 @@ app.get("/sitemap.xml", (req, res) => {
     "/txs",
     "/namespaces",
     "/mosaics",
+    "/mosaictransfer",
     "/accounts",
     "/nodes",
     "/polls",

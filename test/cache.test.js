@@ -238,3 +238,20 @@ test("refreshMosaicTransfers continues past a short intermediate page instead of
     );
   });
 });
+
+test("refreshMosaicTransfers stops instead of looping forever if the server stalls on the same cursor", { timeout: 5000 }, async (t) => {
+  await networkContext.run("mainnet", async () => {
+    const localMaxBefore = getMaxMosaicTransferNo();
+    const stuckPage = [
+      { no: localMaxBefore + 5, hash: "hStuck", namespace: "dim", mosaic: "coin", quantity: 1, div: 6, sender: "SS", recipient: "RS", timeStamp: 999 },
+    ];
+    let calls = 0;
+    t.mock.method(global, "fetch", async () => {
+      calls++;
+      return { ok: true, json: async () => stuckPage };
+    });
+
+    await refreshMosaicTransfers();
+    assert.ok(calls <= 2, `expected the stalled-cursor guard to stop pagination quickly, got ${calls} fetch calls`);
+  });
+});

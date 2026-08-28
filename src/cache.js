@@ -434,8 +434,9 @@ export async function refreshMosaicTransfers() {
         );
         fetched++;
       }
-      if (reachedKnown) break;
-      cursor = batch[batch.length - 1].no;
+      const last = batch[batch.length - 1].no;
+      if (reachedKnown || last === cursor) break;
+      cursor = last;
       await new Promise((r) => setTimeout(r, ARCHIVE_PAGE_DELAY_MS));
     }
     if (fetched) console.log(`Mosaic transfer top-up: ${fetched} new records`);
