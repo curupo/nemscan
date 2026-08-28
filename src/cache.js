@@ -830,6 +830,8 @@ export async function refreshTxTypeArchive() {
         console.error(`Tx type archive refresh failed for type=${filterType}:`, err.message);
       }
     }
+  } catch (err) {
+    console.error("Tx type archive refresh failed:", err.message);
   } finally {
     _refreshingTxTypeArchive[network] = false;
   }

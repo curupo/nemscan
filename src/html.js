@@ -1386,10 +1386,10 @@ export function renderTxTypeArchiveRow(row) {
     : `<span class="muted">—</span>`;
   const date = nemDate(row.time_stamp);
   return `<tr>
-    <td><a href="/block/${row.height}" class="blk-link">${row.height}</a></td>
+    <td><a href="/block/${esc(String(row.height))}" class="blk-link">${esc(String(row.height))}</a></td>
     <td><a href="/account/${esc(row.sender)}" class="mono-link" title="${esc(row.sender)}">${esc(truncKey(row.sender))}</a></td>
     <td>${toCell}</td>
-    <td><span class="type-pill ${row.type === 257 ? "type-transfer" : "type-other"}">${TX_TYPES[row.type] || `Type ${row.type}`}</span></td>
+    <td><span class="type-pill ${row.type === 257 ? "type-transfer" : "type-other"}">${TX_TYPES[row.type] || `Type ${esc(String(row.type))}`}</span></td>
     <td class="td-right">${amountCell}</td>
     <td class="td-right fee-val">${xem(row.fee)} XEM</td>
     <td class="mono-muted">${date.toISOString().slice(0, 16).replace("T", " ")} UTC</td>
@@ -1461,7 +1461,7 @@ export function renderUnconfirmedTxRow(tx) {
   return `<tr>
     <td><a href="/account/${esc(sender)}" class="mono-link" title="${esc(sender)}">${esc(truncKey(sender))}</a></td>
     <td>${toCell}</td>
-    <td><span class="type-pill ${tx.type === 257 ? "type-transfer" : "type-other"}">${TX_TYPES[tx.type] || `Type ${tx.type}`}</span></td>
+    <td><span class="type-pill ${tx.type === 257 ? "type-transfer" : "type-other"}">${TX_TYPES[tx.type] || `Type ${esc(String(tx.type))}`}</span></td>
     <td class="td-right">${amountCell}</td>
     <td class="td-right fee-val">${feeFormatted} XEM</td>
     <td class="mono-muted" title="${esc(ident)}">${esc(truncHash(ident))}</td>
