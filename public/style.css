@@ -1057,6 +1057,43 @@ a {
 .archive-note .archive-note-icon {
     margin-right: 4px;
 }
+.mt-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 14px 20px 0;
+}
+.mt-search input {
+    flex: 1 1 240px;
+    max-width: 320px;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+}
+.mt-search-btn {
+    padding: 7px 16px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-3);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+}
+.mt-search-btn:hover {
+    background: var(--surface-2);
+}
+.mt-search-clear {
+    font-size: 13px;
+    color: var(--muted);
+}
+.mt-search-clear:hover {
+    color: var(--text);
+}
 
 /* Account balance hero */
 .acct-balance-hero {

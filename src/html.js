@@ -7,6 +7,7 @@ import {
   getDailyTxCounts,
   getNamespacesWithArchiveCount,
   getMosaicsWithArchiveCount,
+  getMosaicTransfersCount,
 } from "./db.js";
 import {
   nemDate,
@@ -189,6 +190,7 @@ export function navHTML(activeHref, hideSearch = false) {
     ["/accounts", "Accounts"],
     ["/namespaces", "Namespaces"],
     ["/mosaics", "Mosaics"],
+    ["/mosaictransfer", "Mosaic Transfer"],
     ["/nodes", "Nodes"],
     ["/polls", "Polls"],
   ];
@@ -433,6 +435,12 @@ export function heroNamespace(fqn) {
 export function heroMosaics() {
   return `<div class="hero"><div class="hero-inner">
     <h1>Mosaics</h1>
+  </div></div>`;
+}
+
+export function heroMosaicTransfers() {
+  return `<div class="hero"><div class="hero-inner">
+    <h1>Mosaic Transfer</h1>
   </div></div>`;
 }
 
@@ -1483,7 +1491,7 @@ export function mosaicNotFoundHTML(namespace, name) {
   </div>`;
 }
 
-export function mosaicDetailHTML(m, liveData) {
+export function mosaicDetailHTML(m, liveData, transfers = []) {
   const owner = /^[0-9a-f]{64}$/i.test(m.creator)
     ? addrFromPubKey(m.creator)
     : m.creator;
@@ -1580,11 +1588,26 @@ export function mosaicDetailHTML(m, liveData) {
     )
     .join("");
 
+  const transfersTotal = getMosaicTransfersCount(m.namespace, m.name);
+  const transfersSection = !transfersTotal
+    ? ""
+    : `<div class="card" style="margin-top:16px;">
+    <div class="card-head">
+      <div class="card-title">Recent Transfers <span class="count-badge">${transfersTotal.toLocaleString("en")}</span></div>
+    </div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>#</th><th>Mosaic</th><th class="th-right">Quantity</th><th>Sender</th><th>Recipient</th><th>Tx</th><th>Age</th></tr></thead>
+      <tbody>${transfers.map((t, i) => renderMosaicTransferRow(t, i + 1)).join("")}</tbody>
+    </table></div>
+    ${transfersTotal > transfers.length ? `<div class="home-panel-foot"><a href="/mosaictransfer?ns=${encodeURIComponent(m.namespace)}&m=${encodeURIComponent(m.name)}">View all transfers &rsaquo;</a></div>` : ""}
+  </div>`;
+
   return `
   <div class="card-head">
     <div class="card-title">Overview</div>
   </div>
   <div class="ov-list">${ovRows}</div>
+  ${transfersSection}
   <script>
     function copy(text) {
       navigator.clipboard.writeText(text).then(() => {
@@ -1785,6 +1808,95 @@ export function mosaicsListHTML(items, updatedAt, limit) {
     <thead><tr><th>#</th><th>Mosaic</th><th>Creator</th><th class="th-center">Transferable</th><th class="th-right">Supply</th><th class="th-right">Divisibility</th><th class="th-right">Create Time</th></tr></thead>
     <tbody>${items.map((m, i) => renderMosaicRow(m, i + 1)).join("")}${mosaicLoadMoreRow(items.length, total, limit)}</tbody>
   </table></div>`;
+}
+
+// ── Mosaic transfer list HTML ─────────────────────────────────────────────────
+
+export function renderMosaicTransferRow(t, num) {
+  const qty = (t.quantity / Math.pow(10, t.divisibility)).toLocaleString("en", {
+    minimumFractionDigits: t.divisibility,
+    maximumFractionDigits: t.divisibility,
+  });
+  const detailUrl = `/mosaic/${t.namespace.split(".").join("/")}/${t.mosaic}`;
+  return `<tr>
+    <td class="td-num">${num}</td>
+    <td><a href="${detailUrl}" class="mosaic-id-link" title="${esc(t.namespace)}:${esc(t.mosaic)}">${esc(t.namespace)}:<strong>${esc(t.mosaic)}</strong></a></td>
+    <td class="td-right mono">${qty}</td>
+    <td><a href="/account/${t.sender}" class="mono-link" title="${t.sender}">${truncKey(t.sender)}</a></td>
+    <td><a href="/account/${t.recipient}" class="mono-link" title="${t.recipient}">${truncKey(t.recipient)}</a></td>
+    <td><span class="mono-muted" title="${t.hash}">${truncHash(t.hash)}</span></td>
+    <td><div class="age-rel">${timeAgo(nemDate(t.time_stamp))}</div></td>
+  </tr>`;
+}
+
+function mosaicTransferFilterQs(filter) {
+  return filter?.ns && filter?.m
+    ? `&ns=${encodeURIComponent(filter.ns)}&m=${encodeURIComponent(filter.m)}`
+    : "";
+}
+
+export function mosaicTransferLoadMoreRow(offset, total, limit, filter) {
+  if (offset >= total) return "";
+  const qs = mosaicTransferFilterQs(filter);
+  return `<tr id="mt-load-more-row"><td colspan="7" class="load-more-cell">
+    <button class="load-more-btn"
+            hx-get="/api/mosaictransfer/more?offset=${offset}&limit=${limit}${qs}"
+            hx-target="#mt-load-more-row" hx-swap="outerHTML">
+      <span class="lm-text">Load More</span><span class="lm-spinner"></span>
+    </button>
+  </td></tr>`;
+}
+
+export function mosaicTransferMoreRows(items, offset, total, limit, filter) {
+  if (!items.length) return "";
+  return (
+    items.map((t, i) => renderMosaicTransferRow(t, offset + i + 1)).join("") +
+    mosaicTransferLoadMoreRow(offset + items.length, total, limit, filter)
+  );
+}
+
+export function mosaicTransfersListHTML(items, limit, filter) {
+  const total = getMosaicTransfersCount(filter?.ns, filter?.m);
+  const currentQ = filter?.ns && filter?.m ? `${filter.ns}:${filter.m}` : "";
+  const qs = mosaicTransferFilterQs(filter);
+  const rItem = (n) =>
+    `<a class="rows-menu-item${n === limit ? " active" : ""}" hx-get="/api/mosaictransfer?limit=${n}${qs}" hx-target="#mosaictransfer-card" hx-swap="innerHTML" href="#" role="menuitem">${n}</a>`;
+  const rowsCtrl = `
+      <div class="rows-ctrl">
+        <span class="rows-ctrl-label">Show:</span>
+        <div class="rows-switch">
+          <button type="button" class="rows-switch-btn" aria-haspopup="true" aria-expanded="false" onclick="toggleRowsMenu(event)" title="Rows per page">
+            <span class="rows-switch-label">${limit}</span>
+            <span class="rows-switch-caret">&#9662;</span>
+          </button>
+          <div class="rows-menu" role="menu" aria-label="Rows per page">
+            ${[10, 25, 50, 100].map(rItem).join("")}
+          </div>
+        </div>
+      </div>`;
+  const searchForm = `
+    <form method="GET" action="/mosaictransfer" class="mt-search">
+      <input type="text" name="q" value="${esc(currentQ)}" placeholder="mosaicID e.g. dim:coin">
+      <button type="submit" class="mt-search-btn">Search</button>
+      ${currentQ ? `<a href="/mosaictransfer" class="mt-search-clear">&times; Clear</a>` : ""}
+    </form>`;
+  const body = !items.length
+    ? `<div class="empty-state">${currentQ ? `No transfers found for "${esc(currentQ)}"` : "No mosaic transfers found"}</div>`
+    : `<div class="tbl-wrap"><table>
+      <thead><tr><th>#</th><th>Mosaic</th><th class="th-right">Quantity</th><th>Sender</th><th>Recipient</th><th>Tx</th><th>Age</th></tr></thead>
+      <tbody>${items.map((t, i) => renderMosaicTransferRow(t, i + 1)).join("")}${mosaicTransferLoadMoreRow(items.length, total, limit, filter)}</tbody>
+    </table></div>`;
+  return `
+  <div class="card-head">
+    <div class="card-title">Mosaic Transfer</div>
+    <div class="card-head-right">
+      <span class="total-txt"><strong>${total.toLocaleString("en")}</strong> transfers</span>
+      ${rowsCtrl}
+    </div>
+  </div>
+  ${searchForm}
+  <p class="archive-note"><span class="archive-note-icon">&#9432;</span>Mosaic transfer history is mirrored from <a href="https://explorer.nemtool.com/" target="_blank" rel="noopener">explorer.nemtool.com</a>'s historical index and refreshed every few minutes.</p>
+  ${body}`;
 }
 
 // ── Nodes list HTML ───────────────────────────────────────────────────────────
