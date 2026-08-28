@@ -10,6 +10,8 @@ import {
   refreshAllMosaicsDeep,
   importNamespaceArchive,
   importMosaicArchive,
+  importMosaicTransferArchive,
+  refreshMosaicTransfers,
   importPollArchive,
   refreshRichListCache,
   refreshLiveRichList,
@@ -49,6 +51,8 @@ import {
   getNamespaceByFqn,
   getMosaicsByNamespace,
   getMosaicByNsAndName,
+  getMosaicTransfers,
+  getMosaicTransfersCount,
 } from "./src/db.js";
 import { truncHash, esc } from "./src/helpers.js";
 import {
@@ -87,6 +91,9 @@ import {
   mosaicMoreRows,
   mosaicNotFoundHTML,
   mosaicDetailHTML,
+  heroMosaicTransfers,
+  mosaicTransfersListHTML,
+  mosaicTransferMoreRows,
   pollsListHTML,
   pollMoreRows,
   nodesListHTML,
@@ -177,6 +184,23 @@ app.get("/api/home", async (req, res) => {
 const NEM_ADDRESS_RE = /^[A-Z2-7]{40}$/;
 const NEM_HASH_RE = /^[0-9a-f]{64}$/i;
 const NAMESPACE_FQN_RE = /^[a-z0-9_-]+(\.[a-z0-9_-]+)*$/;
+
+// Parses "namespace:mosaic" from the /mosaictransfer page's search form
+// (?q=dim:coin) into { ns, m }, or null if it doesn't look like a mosaic ID.
+function parseMosaicIdQuery(q) {
+  const raw = (q || "").trim().toLowerCase();
+  const idx = raw.indexOf(":");
+  if (idx < 1 || idx === raw.length - 1) return null;
+  return { ns: raw.slice(0, idx).trim(), m: raw.slice(idx + 1).trim() };
+}
+
+// Reads ns/m query params directly (used by the two /api/mosaictransfer*
+// routes, which receive them pre-split rather than as a single "ns:m" string).
+function mosaicFilterFromQuery(query) {
+  const ns = (query.ns || "").trim().toLowerCase() || null;
+  const m = (query.m || "").trim().toLowerCase() || null;
+  return ns && m ? { ns, m } : { ns: null, m: null };
+}
 
 app.get("/search", (req, res) => {
   const q = (req.query.q || "").trim();
@@ -662,6 +686,60 @@ app.get("/api/mosaics/more", async (req, res) => {
   }
 });
 
+// Mosaic Transfer
+app.get("/mosaictransfer", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
+  const parsed = parseMosaicIdQuery(req.query.q);
+  const apiQs = parsed
+    ? `?ns=${encodeURIComponent(parsed.ns)}&m=${encodeURIComponent(parsed.m)}`
+    : "";
+  res.setHeader("Content-Type", "text/html");
+  res.send(
+    shell(
+      "Mosaic Transfer - NEMSCAN",
+      heroMosaicTransfers(),
+      "mosaictransfer-card",
+      `/api/mosaictransfer${apiQs}`,
+      `<div class="loading"><div class="spinner"></div><span>Fetching mosaic transfers…</span></div>`,
+      "/mosaictransfer",
+      "Browse mosaic (non-XEM asset) transfer transactions on the NEM blockchain, mirrored from explorer.nemtool.com's historical index.",
+      `${base}/mosaictransfer`,
+    ),
+  );
+});
+
+app.get("/api/mosaictransfer", async (req, res) => {
+  const limit = [10, 25, 50, 100].includes(parseInt(req.query.limit))
+    ? parseInt(req.query.limit)
+    : 25;
+  const filter = mosaicFilterFromQuery(req.query);
+  try {
+    const items = getMosaicTransfers(limit, 0, filter.ns, filter.m);
+    res.setHeader("Content-Type", "text/html");
+    res.send(mosaicTransfersListHTML(items, limit, filter));
+  } catch (err) {
+    res.status(503).setHeader("Content-Type", "text/html");
+    res.send(errorFrag(err.message, "/api/mosaictransfer", "#mosaictransfer-card"));
+  }
+});
+
+app.get("/api/mosaictransfer/more", async (req, res) => {
+  const offset = Math.max(0, parseInt(req.query.offset) || 0);
+  const limit = [10, 25, 50, 100].includes(parseInt(req.query.limit))
+    ? parseInt(req.query.limit)
+    : 25;
+  const filter = mosaicFilterFromQuery(req.query);
+  try {
+    const items = getMosaicTransfers(limit, offset, filter.ns, filter.m);
+    const total = getMosaicTransfersCount(filter.ns, filter.m);
+    res.setHeader("Content-Type", "text/html");
+    res.send(mosaicTransferMoreRows(items, offset, total, limit, filter));
+  } catch (err) {
+    res.status(503).setHeader("Content-Type", "text/html");
+    res.send("");
+  }
+});
+
 // Mosaic detail
 app.get(/^\/mosaic\/(.+)$/, (req, res) => {
   const rawPath = req.params[0] || "";
@@ -720,7 +798,8 @@ app.get(/^\/api\/mosaic\/(.+)$/, async (req, res) => {
       /* live API unavailable, use DB only */
     }
     if (!m) return res.send(mosaicNotFoundHTML(namespace, name));
-    res.send(mosaicDetailHTML(m, liveData));
+    const transfers = getMosaicTransfers(10, 0, namespace, name);
+    res.send(mosaicDetailHTML(m, liveData, transfers));
   } catch (err) {
     res
       .status(503)
@@ -922,6 +1001,7 @@ setTimeout(() => {
   // CoinGecko) have no testnet equivalent.
   runFor("mainnet", importNamespaceArchive);
   runFor("mainnet", importMosaicArchive);
+  runFor("mainnet", () => importMosaicTransferArchive().then(refreshMosaicTransfers));
   runFor("mainnet", importPollArchive);
   runFor("mainnet", () => refreshRichListCache().then(refreshLiveRichList));
   runFor("mainnet", refreshPriceCache);
@@ -932,6 +1012,7 @@ setTimeout(() => {
   setInterval(() => runFor("mainnet", refreshLiveRichList), 5 * 60 * 1000);
   setInterval(() => runFor("mainnet", refreshPriceCache), 60 * 1000);
   setInterval(() => runForEachNetwork(refreshNodeOptions), 5 * 60 * 1000);
+  setInterval(() => runFor("mainnet", refreshMosaicTransfers), 5 * 60 * 1000);
   // Deep mosaic refresh: first run 2 minutes after startup to avoid congestion,
   // then every 6 hours. Covers all known namespaces and refreshes current supply.
   setTimeout(() => runForEachNetwork(refreshAllMosaicsDeep), 2 * 60 * 1000);
