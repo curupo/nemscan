@@ -17,8 +17,10 @@ const {
   refreshNamespacesCache,
   scanBlockHeightsForDailyTx,
   refreshDailyTxStats,
+  importMosaicTransferArchive,
+  refreshMosaicTransfers,
 } = await import("../src/cache.js");
-const { getCachedBlock, getCacheMeta } = await import("../src/db.js");
+const { getCachedBlock, getCacheMeta, getMosaicTransfers, getMaxMosaicTransferNo } = await import("../src/db.js");
 
 function mockFetchOnce(t, jsonBody, ok = true) {
   t.mock.method(global, "fetch", async () => ({
@@ -116,5 +118,86 @@ test("refreshDailyTxStats keeps walking backward past a small window, all the wa
     assert.equal(getCacheMeta("blocks_backfill_done"), "1");
     assert.ok(getCachedBlock(1), "expected the genesis block to have been persisted");
     assert.ok(getCachedBlock(150), "expected the chain tip to have been persisted");
+  });
+});
+
+test("importMosaicTransferArchive pages through the mock archive, checkpoints its cursor, and sets the completed flag", async (t) => {
+  // Three pages of 2 records each (well under the 50-per-page server clamp,
+  // which is what ends real pagination) — the mock ends pagination the same
+  // way the real server does: a batch shorter than pageSize.
+  const pages = {
+    // first call: no cursor
+    null: [
+      { no: 300, hash: "h3", namespace: "dim", mosaic: "coin", quantity: 1000, div: 6, sender: "SA", recipient: "RA", timeStamp: 300 },
+      { no: 290, hash: "h2", namespace: "dim", mosaic: "coin", quantity: 2000, div: 6, sender: "SB", recipient: "RB", timeStamp: 290 },
+    ],
+    290: [
+      { no: 280, hash: "h1", namespace: "other", mosaic: "thing", quantity: 5, div: 0, sender: "SC", recipient: "RC", timeStamp: 280 },
+    ],
+  };
+  t.mock.method(global, "fetch", async (url, opts) => {
+    const body = JSON.parse(opts.body);
+    const batch = pages[body.no ?? "null"] || [];
+    return { ok: true, json: async () => batch };
+  });
+
+  await networkContext.run("mainnet", async () => {
+    await importMosaicTransferArchive();
+    assert.equal(getCacheMeta("mosaic_transfers_archive_imported") != null, true);
+    assert.equal(getCacheMeta("mosaic_transfer_archive_cursor"), null);
+    const rows = getMosaicTransfers(10, 0);
+    assert.deepEqual(rows.map((r) => r.no), [300, 290, 280]);
+    assert.equal(getMaxMosaicTransferNo(), 300);
+  });
+});
+
+test("importMosaicTransferArchive is a no-op once already imported", async (t) => {
+  let calls = 0;
+  t.mock.method(global, "fetch", async () => {
+    calls++;
+    return { ok: true, json: async () => [] };
+  });
+  await networkContext.run("mainnet", async () => {
+    await importMosaicTransferArchive();
+    assert.equal(calls, 0, "expected no fetch once mosaic_transfers_archive_imported is already set");
+  });
+});
+
+test("refreshMosaicTransfers does nothing before the initial import has completed", async (t) => {
+  let calls = 0;
+  t.mock.method(global, "fetch", async () => {
+    calls++;
+    return { ok: true, json: async () => [] };
+  });
+  await networkContext.run("testnet", async () => {
+    await refreshMosaicTransfers();
+    assert.equal(calls, 0);
+  });
+});
+
+test("refreshMosaicTransfers walks forward from the local max and stops once it reaches a known record", async (t) => {
+  await networkContext.run("mainnet", async () => {
+    // Seed the "already imported" state this test needs, independent of the
+    // import test above (each test process/table state persists across
+    // tests in this file, but this makes the precondition explicit).
+    const { setCacheMeta } = await import("../src/db.js");
+    setCacheMeta("mosaic_transfers_archive_imported", Date.now());
+
+    const newPage = [
+      { no: 320, hash: "hNew2", namespace: "dim", mosaic: "coin", quantity: 10, div: 6, sender: "SX", recipient: "RX", timeStamp: 320 },
+      { no: 310, hash: "hNew1", namespace: "dim", mosaic: "coin", quantity: 20, div: 6, sender: "SY", recipient: "RY", timeStamp: 310 },
+      { no: 300, hash: "h3", namespace: "dim", mosaic: "coin", quantity: 1000, div: 6, sender: "SA", recipient: "RA", timeStamp: 300 },
+    ];
+    t.mock.method(global, "fetch", async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      assert.equal(body.no ?? null, null, "refreshMosaicTransfers should always start from the newest page");
+      return { ok: true, json: async () => newPage };
+    });
+
+    await refreshMosaicTransfers();
+    assert.equal(getMaxMosaicTransferNo(), 320);
+    const rows = getMosaicTransfers(10, 0);
+    assert.ok(rows.some((r) => r.no === 310));
+    assert.ok(!rows.some((r) => r.hash === "duplicate-should-not-happen"));
   });
 });

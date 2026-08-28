@@ -16,6 +16,8 @@ import {
   upsertPoll,
   upsertRichListEntry,
   upsertBlock,
+  upsertMosaicTransfer,
+  getMaxMosaicTransferNo,
 } from "./db.js";
 import {
   nemFetch,
@@ -320,6 +322,127 @@ export async function importMosaicArchive() {
     );
   } catch (err) {
     console.error("Mosaic archive import failed:", err.message);
+  }
+}
+
+const NEMTOOL_MOSAIC_TRANSFER_LIST_URL =
+  "https://explorer.nemtool.com/mosaic/mosaicTransferList";
+
+// Mosaic transfers have no NIS1 endpoint at all (not even a recent-window
+// one, unlike namespaces/mosaics) — explorer.nemtool.com's own historical
+// index (POST /mosaic/mosaicTransferList, no-cursor descending pagination,
+// pageSize clamped server-side to 50) is the only source. Unlike
+// importNamespaceArchive/importMosaicArchive, this dataset keeps growing
+// forever, so it's split into a one-time historical backfill (this
+// function) plus an ongoing top-up (refreshMosaicTransfers below). It's
+// also expected to be far larger than the namespace/mosaic archives (a
+// single active mosaic can recur almost daily across 10 years), so there's
+// no page-count cap — loop until a page comes back short — and progress is
+// checkpointed to cache_meta every page so a restart mid-import resumes
+// instead of starting over from scratch.
+export async function importMosaicTransferArchive() {
+  if (getCacheMeta("mosaic_transfers_archive_imported")) return;
+  let cursor = parseInt(getCacheMeta("mosaic_transfer_archive_cursor")) || null;
+  let imported = 0;
+  try {
+    for (;;) {
+      const body =
+        cursor != null ? { pageSize: 50, no: cursor } : { pageSize: 50 };
+      const res = await fetch(NEMTOOL_MOSAIC_TRANSFER_LIST_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const batch = await res.json();
+      if (!Array.isArray(batch) || !batch.length) break;
+      for (const item of batch) {
+        upsertMosaicTransfer(
+          item.no,
+          item.hash,
+          item.namespace,
+          item.mosaic,
+          item.quantity || 0,
+          item.div || 0,
+          item.sender,
+          item.recipient,
+          item.timeStamp,
+        );
+      }
+      imported += batch.length;
+      const last = batch[batch.length - 1].no;
+      if (last === cursor) break;
+      cursor = last;
+      setCacheMeta("mosaic_transfer_archive_cursor", cursor);
+      await new Promise((r) => setTimeout(r, ARCHIVE_PAGE_DELAY_MS));
+    }
+    setCacheMeta("mosaic_transfers_archive_imported", Date.now());
+    getDb().exec("DELETE FROM cache_meta WHERE key = 'mosaic_transfer_archive_cursor'");
+    console.log(
+      `Mosaic transfer archive import complete: ${imported} records imported (source: explorer.nemtool.com)`,
+    );
+  } catch (err) {
+    console.error("Mosaic transfer archive import failed:", err.message);
+  }
+}
+
+const _refreshingMosaicTransfers = { mainnet: false, testnet: false };
+
+// Ongoing top-up: unlike the namespace/mosaic/poll archives (immutable once
+// imported), mosaic transfers never stop happening, and there's no NIS1
+// equivalent to fall back on for "what's new since last time" the way
+// refreshNamespacesCache/refreshMosaicsCache can. Only runs once the
+// historical backfill above has completed, since "the local max `no`"
+// isn't a meaningful cursor until then. Idempotent via upsertMosaicTransfer's
+// INSERT OR REPLACE, so overlap with a concurrent run is harmless.
+export async function refreshMosaicTransfers() {
+  const network = currentNetwork();
+  if (_refreshingMosaicTransfers[network]) return;
+  if (!getCacheMeta("mosaic_transfers_archive_imported")) return;
+  _refreshingMosaicTransfers[network] = true;
+  try {
+    const localMax = getMaxMosaicTransferNo() || 0;
+    let cursor = null;
+    let fetched = 0;
+    for (;;) {
+      const body =
+        cursor != null ? { pageSize: 50, no: cursor } : { pageSize: 50 };
+      const res = await fetch(NEMTOOL_MOSAIC_TRANSFER_LIST_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const batch = await res.json();
+      if (!Array.isArray(batch) || !batch.length) break;
+      let reachedKnown = false;
+      for (const item of batch) {
+        if (item.no <= localMax) {
+          reachedKnown = true;
+          break;
+        }
+        upsertMosaicTransfer(
+          item.no,
+          item.hash,
+          item.namespace,
+          item.mosaic,
+          item.quantity || 0,
+          item.div || 0,
+          item.sender,
+          item.recipient,
+          item.timeStamp,
+        );
+        fetched++;
+      }
+      if (reachedKnown || batch.length < 50) break;
+      cursor = batch[batch.length - 1].no;
+      await new Promise((r) => setTimeout(r, ARCHIVE_PAGE_DELAY_MS));
+    }
+    if (fetched) console.log(`Mosaic transfer top-up: ${fetched} new records`);
+  } catch (err) {
+    console.error("Mosaic transfer top-up failed:", err.message);
+  } finally {
+    _refreshingMosaicTransfers[network] = false;
   }
 }
 
