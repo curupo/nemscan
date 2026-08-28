@@ -67,6 +67,18 @@ function openDbLayer(file) {
       time_stamp INTEGER NOT NULL,
       raw TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS mosaic_transfers (
+      no INTEGER PRIMARY KEY,
+      hash TEXT NOT NULL,
+      namespace TEXT NOT NULL,
+      mosaic TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      divisibility INTEGER NOT NULL DEFAULT 0,
+      sender TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      time_stamp INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_mosaic_transfers_ns_mosaic ON mosaic_transfers(namespace, mosaic);
   `);
   try {
     db.exec("ALTER TABLE mosaics ADD COLUMN height INTEGER");
@@ -202,6 +214,20 @@ function openDbLayer(file) {
   const _blockSelectStmt = db.prepare(
     "SELECT raw FROM blocks WHERE height = ?",
   );
+  const _mtUpsertStmt = db.prepare(
+    "INSERT OR REPLACE INTO mosaic_transfers (no, hash, namespace, mosaic, quantity, divisibility, sender, recipient, time_stamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  );
+  const _mtSelectAllStmt = db.prepare(
+    "SELECT no, hash, namespace, mosaic, quantity, divisibility, sender, recipient, time_stamp FROM mosaic_transfers ORDER BY no DESC LIMIT ? OFFSET ?",
+  );
+  const _mtSelectByMosaicStmt = db.prepare(
+    "SELECT no, hash, namespace, mosaic, quantity, divisibility, sender, recipient, time_stamp FROM mosaic_transfers WHERE namespace = ? AND mosaic = ? ORDER BY no DESC LIMIT ? OFFSET ?",
+  );
+  const _mtCountAllStmt = db.prepare("SELECT COUNT(*) AS c FROM mosaic_transfers");
+  const _mtCountByMosaicStmt = db.prepare(
+    "SELECT COUNT(*) AS c FROM mosaic_transfers WHERE namespace = ? AND mosaic = ?",
+  );
+  const _mtMaxNoStmt = db.prepare("SELECT MAX(no) AS maxNo FROM mosaic_transfers");
 
   return {
     db,
@@ -219,6 +245,13 @@ function openDbLayer(file) {
     getMosaicsByNamespace: (fqn) => _mosByNamespaceStmt.all(fqn, fqn),
     getMosaicByNsAndName: (namespace, name) =>
       _mosByNsAndNameStmt.get(namespace, name, namespace, name) || null,
+    getMosaicTransfers: (limit = 25, offset = 0, ns = null, m = null) =>
+      ns && m
+        ? _mtSelectByMosaicStmt.all(ns, m, limit, offset)
+        : _mtSelectAllStmt.all(limit, offset),
+    getMosaicTransfersCount: (ns = null, m = null) =>
+      (ns && m ? _mtCountByMosaicStmt.get(ns, m) : _mtCountAllStmt.get()).c,
+    getMaxMosaicTransferNo: () => _mtMaxNoStmt.get().maxNo,
     getCachedPolls: (limit = 25, offset = 0) => _pollSelectStmt.all(limit, offset),
     getCachedPollsCount: () => _pollCountStmt.get().c,
     getCachedRichList: (limit = 25, offset = 0) => _accSelectStmt.all(limit, offset),
@@ -240,6 +273,8 @@ function openDbLayer(file) {
       _mosArchUpsertStmt.run(no, namespace, name, creator, description, divisibility, supply, transferable, height, timeStamp),
     upsertPoll: (id, address, title, type, doe) => _pollUpsertStmt.run(id, address, title, type, doe),
     upsertRichListEntry: (rank, address, balance, info) => _accUpsertStmt.run(rank, address, balance, info),
+    upsertMosaicTransfer: (no, hash, namespace, mosaic, quantity, divisibility, sender, recipient, timeStamp) =>
+      _mtUpsertStmt.run(no, hash, namespace, mosaic, quantity, divisibility, sender, recipient, timeStamp),
   };
 }
 
@@ -293,6 +328,15 @@ export function getMosaicsByNamespace(fqn) {
 export function getMosaicByNsAndName(namespace, name) {
   return layer().getMosaicByNsAndName(namespace, name);
 }
+export function getMosaicTransfers(limit = 25, offset = 0, ns = null, m = null) {
+  return layer().getMosaicTransfers(limit, offset, ns, m);
+}
+export function getMosaicTransfersCount(ns = null, m = null) {
+  return layer().getMosaicTransfersCount(ns, m);
+}
+export function getMaxMosaicTransferNo() {
+  return layer().getMaxMosaicTransferNo();
+}
 export function getCachedPolls(limit = 25, offset = 0) {
   return layer().getCachedPolls(limit, offset);
 }
@@ -343,6 +387,9 @@ export function upsertPoll(id, address, title, type, doe) {
 }
 export function upsertRichListEntry(rank, address, balance, info) {
   layer().upsertRichListEntry(rank, address, balance, info);
+}
+export function upsertMosaicTransfer(no, hash, namespace, mosaic, quantity, divisibility, sender, recipient, timeStamp) {
+  layer().upsertMosaicTransfer(no, hash, namespace, mosaic, quantity, divisibility, sender, recipient, timeStamp);
 }
 
 // Exported for the rare cases where cache.js needs raw DB access

@@ -12,7 +12,16 @@ import { networkContext } from "../src/context.js";
 // before importing db.js (or constants.js indirectly via db.js).
 process.env.NEMSCAN_DB_DIR = mkdtempSync(join(tmpdir(), "nemscan-db-test-"));
 
-const { setCacheMeta, getCacheMeta, upsertBlock, getCachedBlock } = await import("../src/db.js");
+const {
+  setCacheMeta,
+  getCacheMeta,
+  upsertBlock,
+  getCachedBlock,
+  upsertMosaicTransfer,
+  getMosaicTransfers,
+  getMosaicTransfersCount,
+  getMaxMosaicTransferNo,
+} = await import("../src/db.js");
 
 test("mainnet and testnet DB layers are independent", () => {
   networkContext.run("mainnet", () => {
@@ -59,5 +68,64 @@ test("blocks table is isolated between mainnet and testnet", () => {
   });
   networkContext.run("testnet", () => {
     assert.equal(getCachedBlock(500).network, "testnet");
+  });
+});
+
+test("upsertMosaicTransfer/getMosaicTransfers round-trips and orders by no DESC", () => {
+  networkContext.run("mainnet", () => {
+    upsertMosaicTransfer(100, "hashA", "dim", "coin", 5_000_000, 6, "SENDER1", "RECIP1", 111);
+    upsertMosaicTransfer(200, "hashB", "dim", "coin", 3_000_000, 6, "SENDER2", "RECIP2", 222);
+    const rows = getMosaicTransfers(10, 0);
+    assert.equal(rows[0].no, 200);
+    assert.equal(rows[0].hash, "hashB");
+    assert.equal(rows[1].no, 100);
+  });
+});
+
+test("getMosaicTransfers filters to a single namespace+mosaic when both are given", () => {
+  networkContext.run("mainnet", () => {
+    upsertMosaicTransfer(300, "hashC", "other", "thing", 1, 0, "S", "R", 300);
+    const rows = getMosaicTransfers(10, 0, "dim", "coin");
+    assert.ok(rows.length > 0);
+    assert.ok(rows.every((r) => r.namespace === "dim" && r.mosaic === "coin"));
+    assert.ok(!rows.some((r) => r.no === 300));
+  });
+});
+
+test("getMosaicTransfers supports offset for pagination", () => {
+  networkContext.run("mainnet", () => {
+    const page1 = getMosaicTransfers(1, 0, "dim", "coin");
+    const page2 = getMosaicTransfers(1, 1, "dim", "coin");
+    assert.equal(page1[0].no, 200);
+    assert.equal(page2[0].no, 100);
+  });
+});
+
+test("getMosaicTransfersCount matches filtered and unfiltered result sets", () => {
+  networkContext.run("mainnet", () => {
+    assert.equal(getMosaicTransfersCount("dim", "coin"), 2);
+    assert.ok(getMosaicTransfersCount() >= 3);
+  });
+});
+
+test("getMaxMosaicTransferNo returns the highest stored no", () => {
+  networkContext.run("mainnet", () => {
+    assert.equal(getMaxMosaicTransferNo(), 300);
+  });
+});
+
+test("getMaxMosaicTransferNo returns null when the table is empty", () => {
+  networkContext.run("testnet", () => {
+    assert.equal(getMaxMosaicTransferNo(), null);
+  });
+});
+
+test("mosaic_transfers table is isolated between mainnet and testnet", () => {
+  networkContext.run("testnet", () => {
+    upsertMosaicTransfer(1, "hashT", "t", "coin", 1, 0, "S", "R", 1);
+    assert.equal(getMosaicTransfersCount(), 1);
+  });
+  networkContext.run("mainnet", () => {
+    assert.ok(getMosaicTransfersCount() >= 3);
   });
 });
