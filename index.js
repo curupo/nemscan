@@ -54,7 +54,12 @@ import {
   getMosaicTransfers,
   getMosaicTransfersCount,
 } from "./src/db.js";
-import { truncHash, esc } from "./src/helpers.js";
+import {
+  truncHash,
+  esc,
+  parseMosaicIdQuery,
+  mosaicFilterFromQuery,
+} from "./src/helpers.js";
 import {
   shell,
   accountShell,
@@ -184,23 +189,6 @@ app.get("/api/home", async (req, res) => {
 const NEM_ADDRESS_RE = /^[A-Z2-7]{40}$/;
 const NEM_HASH_RE = /^[0-9a-f]{64}$/i;
 const NAMESPACE_FQN_RE = /^[a-z0-9_-]+(\.[a-z0-9_-]+)*$/;
-
-// Parses "namespace:mosaic" from the /mosaictransfer page's search form
-// (?q=dim:coin) into { ns, m }, or null if it doesn't look like a mosaic ID.
-function parseMosaicIdQuery(q) {
-  const raw = (q || "").trim().toLowerCase();
-  const idx = raw.indexOf(":");
-  if (idx < 1 || idx === raw.length - 1) return null;
-  return { ns: raw.slice(0, idx).trim(), m: raw.slice(idx + 1).trim() };
-}
-
-// Reads ns/m query params directly (used by the two /api/mosaictransfer*
-// routes, which receive them pre-split rather than as a single "ns:m" string).
-function mosaicFilterFromQuery(query) {
-  const ns = (query.ns || "").trim().toLowerCase() || null;
-  const m = (query.m || "").trim().toLowerCase() || null;
-  return ns && m ? { ns, m } : { ns: null, m: null };
-}
 
 app.get("/search", (req, res) => {
   const q = (req.query.q || "").trim();
@@ -695,9 +683,14 @@ app.get("/mosaictransfer", (req, res) => {
       const f = mosaicFilterFromQuery(req.query);
       return f.ns && f.m ? f : null;
     })();
-  const apiQs = parsed
-    ? `?ns=${encodeURIComponent(parsed.ns)}&m=${encodeURIComponent(parsed.m)}`
-    : "";
+  const limit = [10, 25, 50, 100].includes(parseInt(req.query.limit))
+    ? parseInt(req.query.limit)
+    : null;
+  const qsParts = parsed
+    ? [`ns=${encodeURIComponent(parsed.ns)}`, `m=${encodeURIComponent(parsed.m)}`]
+    : [];
+  if (limit) qsParts.push(`limit=${limit}`);
+  const apiQs = qsParts.length ? `?${qsParts.join("&")}` : "";
   res.setHeader("Content-Type", "text/html");
   res.send(
     shell(
@@ -756,8 +749,8 @@ app.get(/^\/mosaic\/(.+)$/, (req, res) => {
   const rawPath = req.params[0] || "";
   const parts = rawPath.split("/").filter(Boolean);
   if (parts.length < 2) return res.status(400).send("Invalid mosaic path");
-  const name = parts[parts.length - 1];
-  const namespace = parts.slice(0, -1).join(".");
+  const name = parts[parts.length - 1].toLowerCase();
+  const namespace = parts.slice(0, -1).join(".").toLowerCase();
   const title = `${namespace}:${name}`;
   res.setHeader("Content-Type", "text/html");
   const base = `${req.protocol}://${req.get("host")}`;
@@ -779,8 +772,8 @@ app.get(/^\/api\/mosaic\/(.+)$/, async (req, res) => {
   const rawPath = req.params[0] || "";
   const parts = rawPath.split("/").filter(Boolean);
   if (parts.length < 2) return res.status(400).send("Invalid mosaic path");
-  const name = parts[parts.length - 1];
-  const namespace = parts.slice(0, -1).join(".");
+  const name = parts[parts.length - 1].toLowerCase();
+  const namespace = parts.slice(0, -1).join(".").toLowerCase();
   res.setHeader("Content-Type", "text/html");
   try {
     let m = getMosaicByNsAndName(namespace, name);

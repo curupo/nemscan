@@ -142,6 +142,24 @@ test("renderMosaicTransferRow formats quantity using the row's own divisibility 
   assert.match(html, /href="\/account\/RECIPADDR"/);
 });
 
+test("renderMosaicTransferRow escapes sender/recipient/hash, which come from a third-party archive rather than this app's own validated addresses", () => {
+  const html = renderMosaicTransferRow(
+    {
+      no: 1,
+      hash: '"><script>1</script>',
+      namespace: "dim",
+      mosaic: "coin",
+      quantity: 1,
+      divisibility: 0,
+      sender: '"><script>2</script>',
+      recipient: '"><script>3</script>',
+      time_stamp: 100,
+    },
+    1,
+  );
+  assert.doesNotMatch(html, /<script>/);
+});
+
 test("renderMosaicTransferRow formats a zero-divisibility mosaic as a whole number", () => {
   const html = renderMosaicTransferRow(
     { no: 1, hash: "abc123", namespace: "smart-uq", mosaic: "dig", quantity: 800, divisibility: 0, sender: "S", recipient: "R", time_stamp: 100 },
@@ -176,6 +194,12 @@ test("mosaicTransfersListHTML renders rows and reflects getMosaicTransfersCount 
     assert.match(html, /dim:<strong>coin<\/strong>/);
     assert.match(html, /<strong>1<\/strong> transfers/);
   });
+});
+
+test("mosaicTransfersListHTML's search input carries a pattern for client-side validation and a hidden field to preserve the current rows-per-page on submit", () => {
+  const html = mosaicTransfersListHTML([], 50, { ns: null, m: null });
+  assert.match(html, /<input[^>]*name="q"[^>]*pattern="[^"]+"/);
+  assert.match(html, /<input type="hidden" name="limit" value="50">/);
 });
 
 test("mosaicDetailHTML omits the Recent Transfers section for a mosaic with no indexed transfers", () => {

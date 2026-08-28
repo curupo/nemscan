@@ -1822,9 +1822,9 @@ export function renderMosaicTransferRow(t, num) {
     <td class="td-num">${num}</td>
     <td><a href="${detailUrl}" class="mosaic-id-link" title="${esc(t.namespace)}:${esc(t.mosaic)}">${esc(t.namespace)}:<strong>${esc(t.mosaic)}</strong></a></td>
     <td class="td-right mono">${qty}</td>
-    <td><a href="/account/${t.sender}" class="mono-link" title="${t.sender}">${truncKey(t.sender)}</a></td>
-    <td><a href="/account/${t.recipient}" class="mono-link" title="${t.recipient}">${truncKey(t.recipient)}</a></td>
-    <td><span class="mono-muted" title="${t.hash}">${truncHash(t.hash)}</span></td>
+    <td><a href="/account/${esc(t.sender)}" class="mono-link" title="${esc(t.sender)}">${esc(truncKey(t.sender))}</a></td>
+    <td><a href="/account/${esc(t.recipient)}" class="mono-link" title="${esc(t.recipient)}">${esc(truncKey(t.recipient))}</a></td>
+    <td><span class="mono-muted" title="${esc(t.hash)}">${esc(truncHash(t.hash))}</span></td>
     <td><div class="age-rel">${timeAgo(nemDate(t.time_stamp))}</div></td>
   </tr>`;
 }
@@ -1876,7 +1876,9 @@ export function mosaicTransfersListHTML(items, limit, filter) {
       </div>`;
   const searchForm = `
     <form method="GET" action="/mosaictransfer" class="mt-search">
-      <input type="text" name="q" value="${esc(currentQ)}" placeholder="mosaicID e.g. dim:coin">
+      <input type="hidden" name="limit" value="${limit}">
+      <input type="text" name="q" value="${esc(currentQ)}" placeholder="mosaicID e.g. dim:coin"
+             pattern="[a-z0-9_.\\-]+:[a-z0-9_'\\-]+" title="Format: namespace:mosaic (e.g. dim:coin)">
       <button type="submit" class="mt-search-btn">Search</button>
       ${currentQ ? `<a href="/mosaictransfer" class="mt-search-clear">&times; Clear</a>` : ""}
     </form>`;

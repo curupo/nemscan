@@ -95,3 +95,24 @@ export function decodeMsg(msg) {
     return "";
   }
 }
+
+// Parses "namespace:mosaic" (e.g. from the /mosaictransfer page's search
+// form, ?q=dim:coin) into { ns, m }, or null if it doesn't look like a
+// mosaic ID. `String(q || "")` guards against Express handing back an array
+// for a repeated query param (?q=a&q=b) — .trim() would throw on an array.
+export function parseMosaicIdQuery(q) {
+  const raw = String(q || "").trim().toLowerCase();
+  const idx = raw.indexOf(":");
+  if (idx < 1 || idx === raw.length - 1) return null;
+  return { ns: raw.slice(0, idx).trim(), m: raw.slice(idx + 1).trim() };
+}
+
+// Reads ns/m query params directly into a { ns, m } filter (used by the
+// /api/mosaictransfer* routes, which receive them pre-split rather than as
+// a single "ns:m" string). Returns { ns: null, m: null } unless both are
+// present, since a partial filter has no well-defined meaning here.
+export function mosaicFilterFromQuery(query) {
+  const ns = String(query.ns || "").trim().toLowerCase() || null;
+  const m = String(query.m || "").trim().toLowerCase() || null;
+  return ns && m ? { ns, m } : { ns: null, m: null };
+}
