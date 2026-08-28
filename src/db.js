@@ -79,6 +79,19 @@ function openDbLayer(file) {
       time_stamp INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_mosaic_transfers_ns_mosaic ON mosaic_transfers(namespace, mosaic);
+    CREATE TABLE IF NOT EXISTS tx_type_archive (
+      filter_type TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      height INTEGER,
+      sender TEXT,
+      recipient TEXT,
+      amount INTEGER,
+      fee INTEGER,
+      time_stamp INTEGER,
+      type INTEGER,
+      PRIMARY KEY (filter_type, hash)
+    );
+    CREATE INDEX IF NOT EXISTS idx_tx_type_archive_filter ON tx_type_archive(filter_type, height DESC);
   `);
   try {
     db.exec("ALTER TABLE mosaics ADD COLUMN height INTEGER");
@@ -228,6 +241,22 @@ function openDbLayer(file) {
     "SELECT COUNT(*) AS c FROM mosaic_transfers WHERE namespace = ? AND mosaic = ?",
   );
   const _mtMaxNoStmt = db.prepare("SELECT MAX(no) AS maxNo FROM mosaic_transfers");
+  const _ttaUpsertStmt = db.prepare(
+    "INSERT OR REPLACE INTO tx_type_archive (filter_type, hash, height, sender, recipient, amount, fee, time_stamp, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  );
+  const _ttaSelectStmt = db.prepare(
+    "SELECT hash, height, sender, recipient, amount, fee, time_stamp, type FROM tx_type_archive WHERE filter_type = ? ORDER BY height DESC, hash LIMIT ? OFFSET ?",
+  );
+  const _ttaCountStmt = db.prepare(
+    "SELECT COUNT(*) AS c FROM tx_type_archive WHERE filter_type = ?",
+  );
+  const _ttaTrimStmt = db.prepare(`
+    DELETE FROM tx_type_archive
+    WHERE filter_type = ?
+      AND hash NOT IN (
+        SELECT hash FROM tx_type_archive WHERE filter_type = ? ORDER BY height DESC, hash LIMIT ?
+      )
+  `);
 
   return {
     db,
@@ -252,6 +281,10 @@ function openDbLayer(file) {
     getMosaicTransfersCount: (ns = null, m = null) =>
       (ns && m ? _mtCountByMosaicStmt.get(ns, m) : _mtCountAllStmt.get()).c,
     getMaxMosaicTransferNo: () => _mtMaxNoStmt.get().maxNo,
+    getTxTypeArchive: (filterType, limit = 25, offset = 0) =>
+      _ttaSelectStmt.all(filterType, limit, offset),
+    getTxTypeArchiveCount: (filterType) => _ttaCountStmt.get(filterType).c,
+    trimTxTypeArchive: (filterType, keep) => _ttaTrimStmt.run(filterType, filterType, keep),
     getCachedPolls: (limit = 25, offset = 0) => _pollSelectStmt.all(limit, offset),
     getCachedPollsCount: () => _pollCountStmt.get().c,
     getCachedRichList: (limit = 25, offset = 0) => _accSelectStmt.all(limit, offset),
@@ -275,6 +308,8 @@ function openDbLayer(file) {
     upsertRichListEntry: (rank, address, balance, info) => _accUpsertStmt.run(rank, address, balance, info),
     upsertMosaicTransfer: (no, hash, namespace, mosaic, quantity, divisibility, sender, recipient, timeStamp) =>
       _mtUpsertStmt.run(no, hash, namespace, mosaic, quantity, divisibility, sender, recipient, timeStamp),
+    upsertTxTypeArchive: (filterType, hash, height, sender, recipient, amount, fee, timeStamp, type) =>
+      _ttaUpsertStmt.run(filterType, hash, height, sender, recipient, amount, fee, timeStamp, type),
   };
 }
 
@@ -337,6 +372,15 @@ export function getMosaicTransfersCount(ns = null, m = null) {
 export function getMaxMosaicTransferNo() {
   return layer().getMaxMosaicTransferNo();
 }
+export function getTxTypeArchive(filterType, limit = 25, offset = 0) {
+  return layer().getTxTypeArchive(filterType, limit, offset);
+}
+export function getTxTypeArchiveCount(filterType) {
+  return layer().getTxTypeArchiveCount(filterType);
+}
+export function trimTxTypeArchive(filterType, keep) {
+  layer().trimTxTypeArchive(filterType, keep);
+}
 export function getCachedPolls(limit = 25, offset = 0) {
   return layer().getCachedPolls(limit, offset);
 }
@@ -390,6 +434,9 @@ export function upsertRichListEntry(rank, address, balance, info) {
 }
 export function upsertMosaicTransfer(no, hash, namespace, mosaic, quantity, divisibility, sender, recipient, timeStamp) {
   layer().upsertMosaicTransfer(no, hash, namespace, mosaic, quantity, divisibility, sender, recipient, timeStamp);
+}
+export function upsertTxTypeArchive(filterType, hash, height, sender, recipient, amount, fee, timeStamp, type) {
+  layer().upsertTxTypeArchive(filterType, hash, height, sender, recipient, amount, fee, timeStamp, type);
 }
 
 // Exported for the rare cases where cache.js needs raw DB access

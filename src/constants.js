@@ -31,6 +31,29 @@ export const TX_TYPES = {
   16386: "Mosaic Supply",
 };
 
+// The six explorer.nemtool.com /tx/list "type" filter values that get their
+// own local archive. "mosaic" isn't here — it's the same data /mosaictransfer
+// already has (a transfer with a mosaic attachment), so the dropdown links
+// there instead of duplicating it. "" (all) is the existing live /txs view.
+export const TX_LIST_FILTER_TYPES = [
+  "transfer",
+  "importance",
+  "aggregate",
+  "multisig",
+  "namespace",
+  "apostille",
+];
+
+// Newest rows kept per filter_type in tx_type_archive — a bounded rolling
+// window, not a full historical backfill (unlike mosaic_transfers). "transfer"
+// alone is most of the chain's tx history, so an unbounded archive per type
+// isn't viable the way it was for mosaic transfers.
+export const TX_TYPE_ARCHIVE_WINDOW = 500;
+
+// Fixed page size for the type-filtered /txs views (list + "load more").
+// Unlike /mosaictransfer, this page has no rows-per-page control.
+export const TX_TYPE_LIST_PAGE_SIZE = 25;
+
 export const DAILY_TX_BACKFILL_CHUNK = 60;
 
 // Hard cap on how many blocks getTxsFromBlocks() will walk backward looking

@@ -12,6 +12,9 @@ import {
   importMosaicArchive,
   importMosaicTransferArchive,
   refreshMosaicTransfers,
+  importTxTypeArchive,
+  refreshTxTypeArchive,
+  fetchUnconfirmedTxs,
   importPollArchive,
   refreshRichListCache,
   refreshLiveRichList,
@@ -26,7 +29,7 @@ import {
   getNodeOptionsUpdatedAt,
   refreshNodeOptions,
 } from "./src/nodePool.js";
-import { NETWORKS } from "./src/constants.js";
+import { NETWORKS, TX_LIST_FILTER_TYPES, TX_TYPE_LIST_PAGE_SIZE } from "./src/constants.js";
 import {
   getHeight,
   getBlock,
@@ -53,6 +56,8 @@ import {
   getMosaicByNsAndName,
   getMosaicTransfers,
   getMosaicTransfersCount,
+  getTxTypeArchive,
+  getTxTypeArchiveCount,
 } from "./src/db.js";
 import {
   truncHash,
@@ -85,6 +90,9 @@ import {
   txMoreRows,
   globalTxTableHTML,
   globalTxMoreRows,
+  txTypeArchiveListHTML,
+  txTypeArchiveMoreRows,
+  unconfirmedTxListHTML,
   harvestsHTML,
   mosaicsHTML,
   namespacesHTML,
@@ -453,13 +461,15 @@ app.get("/api/account/:address/namespaces", async (req, res) => {
 // Transactions list
 app.get("/txs", (req, res) => {
   const base = `${req.protocol}://${req.get("host")}`;
+  const type = TX_LIST_FILTER_TYPES.includes(req.query.type) ? req.query.type : null;
+  const apiUrl = type ? `/api/txs?type=${type}` : "/api/txs";
   res.setHeader("Content-Type", "text/html");
   res.send(
     shell(
       "Transactions - NEMSCAN",
-      heroTxs(),
+      heroTxs(type),
       "txs-card",
-      "/api/txs",
+      apiUrl,
       `<div class="loading"><div class="spinner"></div><span>Fetching latest transactions…</span></div>`,
       "/txs",
       "Browse all NEM (XEM) blockchain transactions on NEMSCAN. View sender, recipient, amount, and block details.",
@@ -469,6 +479,20 @@ app.get("/txs", (req, res) => {
 });
 
 app.get("/api/txs", async (req, res) => {
+  const type = TX_LIST_FILTER_TYPES.includes(req.query.type) ? req.query.type : null;
+  if (type) {
+    res.setHeader("Content-Type", "text/html");
+    if (currentNetwork() === "testnet") {
+      return res.send(unavailableOnTestnetHTML("Transaction type filters"));
+    }
+    try {
+      const items = getTxTypeArchive(type, TX_TYPE_LIST_PAGE_SIZE, 0);
+      return res.send(txTypeArchiveListHTML(items, type, TX_TYPE_LIST_PAGE_SIZE));
+    } catch (err) {
+      res.status(503);
+      return res.send(errorFrag(err.message, `/api/txs?type=${type}`, "#txs-card"));
+    }
+  }
   try {
     const height = await getHeight();
     const fromHeight = parseInt(req.query.fromBlock) || height;
@@ -482,6 +506,21 @@ app.get("/api/txs", async (req, res) => {
 });
 
 app.get("/api/txs/more", async (req, res) => {
+  const type = TX_LIST_FILTER_TYPES.includes(req.query.type) ? req.query.type : null;
+  if (type) {
+    res.setHeader("Content-Type", "text/html");
+    if (currentNetwork() === "testnet") {
+      return res.send(unavailableOnTestnetHTML("Transaction type filters"));
+    }
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    try {
+      const items = getTxTypeArchive(type, TX_TYPE_LIST_PAGE_SIZE, offset);
+      const total = getTxTypeArchiveCount(type);
+      return res.send(txTypeArchiveMoreRows(items, type, offset, total, TX_TYPE_LIST_PAGE_SIZE));
+    } catch {
+      return res.send("");
+    }
+  }
   const fromBlock = parseInt(req.query.fromBlock) || 1;
   try {
     const { items, nextFromBlock } = await getTxsFromBlocks(fromBlock);
@@ -490,6 +529,37 @@ app.get("/api/txs/more", async (req, res) => {
   } catch (err) {
     res.status(503).setHeader("Content-Type", "text/html");
     res.send("");
+  }
+});
+
+app.get("/txs/unconfirmed", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
+  res.setHeader("Content-Type", "text/html");
+  res.send(
+    shell(
+      "Pending Transactions - NEMSCAN",
+      heroTxs("pending"),
+      "txs-unconfirmed-card",
+      "/api/txs/unconfirmed",
+      `<div class="loading"><div class="spinner"></div><span>Fetching pending transactions…</span></div>`,
+      "/txs",
+      "Browse the current unconfirmed (pending) NEM transaction pool on NEMSCAN, mirrored from explorer.nemtool.com.",
+      `${base}/txs/unconfirmed`,
+    ),
+  );
+});
+
+app.get("/api/txs/unconfirmed", async (req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  if (currentNetwork() === "testnet") {
+    return res.send(unavailableOnTestnetHTML("Pending Transactions"));
+  }
+  try {
+    const items = await fetchUnconfirmedTxs();
+    res.send(unconfirmedTxListHTML(items));
+  } catch (err) {
+    res.status(503);
+    res.send(errorFrag(err.message, "/api/txs/unconfirmed", "#txs-unconfirmed-card"));
   }
 });
 
@@ -1007,6 +1077,7 @@ setTimeout(() => {
   runFor("mainnet", importNamespaceArchive);
   runFor("mainnet", importMosaicArchive);
   runFor("mainnet", () => importMosaicTransferArchive().then(refreshMosaicTransfers));
+  runFor("mainnet", () => importTxTypeArchive().then(refreshTxTypeArchive));
   runFor("mainnet", importPollArchive);
   runFor("mainnet", () => refreshRichListCache().then(refreshLiveRichList));
   runFor("mainnet", refreshPriceCache);
@@ -1018,6 +1089,7 @@ setTimeout(() => {
   setInterval(() => runFor("mainnet", refreshPriceCache), 60 * 1000);
   setInterval(() => runForEachNetwork(refreshNodeOptions), 5 * 60 * 1000);
   setInterval(() => runFor("mainnet", refreshMosaicTransfers), 5 * 60 * 1000);
+  setInterval(() => runFor("mainnet", refreshTxTypeArchive), 5 * 60 * 1000);
   // Deep mosaic refresh: first run 2 minutes after startup to avoid congestion,
   // then every 6 hours. Covers all known namespaces and refreshes current supply.
   setTimeout(() => runForEachNetwork(refreshAllMosaicsDeep), 2 * 60 * 1000);

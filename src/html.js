@@ -8,6 +8,7 @@ import {
   getNamespacesWithArchiveCount,
   getMosaicsWithArchiveCount,
   getMosaicTransfersCount,
+  getTxTypeArchiveCount,
 } from "./db.js";
 import {
   nemDate,
@@ -23,7 +24,7 @@ import {
 } from "./helpers.js";
 import { nodeContext, currentNetwork } from "./context.js";
 import { getNodeOptions, getNodeOptionsUpdatedAt, getAutoBestNode } from "./nodePool.js";
-import { TX_TYPES, XEM_TOTAL_SUPPLY, DAILY_TX_DAYS, NETWORKS } from "./constants.js";
+import { TX_TYPES, XEM_TOTAL_SUPPLY, DAILY_TX_DAYS, NETWORKS, TX_LIST_FILTER_TYPES } from "./constants.js";
 
 // ── CSS cache-busting version ───────────────────────────────────────────────────────
 
@@ -399,9 +400,55 @@ export function heroBlock(height) {
   </div></div>`;
 }
 
-export function heroTxs() {
+const TX_TYPE_LABELS = {
+  transfer: "Transfer",
+  importance: "Importance",
+  aggregate: "Aggregate",
+  multisig: "Multisig",
+  namespace: "Namespace",
+  apostille: "Apostille",
+  pending: "Pending",
+};
+
+// The "Type" filter dropdown on /txs and /txs/unconfirmed. Deliberately
+// reuses the existing rows-switch/rows-menu/rows-menu-item CSS classes and
+// the generic window.toggleRowsMenu JS (both already scoped per-instance via
+// btn.parentElement, so a second independent dropdown needs no changes) —
+// no new CSS or JS. Unlike the rows-per-page instance of this same
+// component (which stays htmx-driven), these items are plain links: picking
+// a type swaps the whole dataset/pagination model, so a real navigation
+// (shareable URL) fits better than an in-page swap.
+export function typeSwitch(currentType) {
+  const label = TX_TYPE_LABELS[currentType] || "All";
+  const item = (href, text, active) =>
+    `<a class="rows-menu-item${active ? " active" : ""}" href="${href}" role="menuitem">${text}</a>`;
+  const typeItems = TX_LIST_FILTER_TYPES.map((t) =>
+    item(`/txs?type=${t}`, TX_TYPE_LABELS[t], currentType === t),
+  ).join("");
+  return `
+    <div class="rows-ctrl">
+      <span class="rows-ctrl-label">Type:</span>
+      <div class="rows-switch">
+        <button type="button" class="rows-switch-btn" aria-haspopup="true" aria-expanded="false" onclick="toggleRowsMenu(event)" title="Transaction type">
+          <span class="rows-switch-label">${label}</span>
+          <span class="rows-switch-caret">&#9662;</span>
+        </button>
+        <div class="rows-menu" role="menu" aria-label="Transaction type">
+          ${item("/txs", "All", !currentType)}
+          ${typeItems}
+          ${item("/mosaictransfer", "Mosaic", false)}
+          ${item("/txs/unconfirmed", "Pending", currentType === "pending")}
+        </div>
+      </div>
+    </div>`;
+}
+
+export function heroTxs(currentType = null) {
   return `<div class="hero"><div class="hero-inner">
-    <h1>Transactions</h1>
+    <div class="hero-row">
+      <h1>Transactions</h1>
+      ${typeSwitch(currentType)}
+    </div>
   </div></div>`;
 }
 
@@ -1315,6 +1362,128 @@ export function renderGlobalTxRow(item) {
     <td class="mono-muted">${date.toISOString().slice(0, 16).replace("T", " ")} UTC</td>
     <td>${timeAgo(date)}</td>
   </tr>`;
+}
+
+// Row renderer for the type-filtered archive (mirrored from
+// explorer.nemtool.com's /tx/list, see cache.js's importTxTypeArchive).
+// Deliberately NOT a reuse of renderGlobalTxRow: that function works off a
+// raw NIS1 tx object (tx.signer as a public key, resolved via
+// addrFromPubKey), while the archive already has resolved address strings
+// for sender/recipient — different shapes. It also can't gate
+// Recipient/Amount on `type === 257` the way renderGlobalTxRow does:
+// confirmed live, "importance" (2049) and "multisig" (4100) archive rows DO
+// have a real recipient/amount, while "namespace" (8193) and "aggregate"
+// (4097) rows have recipient: "" and amount: 0 (those tx types don't move
+// XEM or name a recipient) — so the gate here is "does this row have a
+// recipient", not "is this a plain transfer".
+export function renderTxTypeArchiveRow(row) {
+  const hasRecipient = !!row.recipient;
+  const toCell = hasRecipient
+    ? `<a href="/account/${esc(row.recipient)}" class="mono-link" title="${esc(row.recipient)}">${esc(truncKey(row.recipient))}</a>`
+    : `<span class="muted">—</span>`;
+  const amountCell = hasRecipient
+    ? `${xem(row.amount)} XEM`
+    : `<span class="muted">—</span>`;
+  const date = nemDate(row.time_stamp);
+  return `<tr>
+    <td><a href="/block/${row.height}" class="blk-link">${row.height}</a></td>
+    <td><a href="/account/${esc(row.sender)}" class="mono-link" title="${esc(row.sender)}">${esc(truncKey(row.sender))}</a></td>
+    <td>${toCell}</td>
+    <td><span class="type-pill ${row.type === 257 ? "type-transfer" : "type-other"}">${TX_TYPES[row.type] || `Type ${row.type}`}</span></td>
+    <td class="td-right">${amountCell}</td>
+    <td class="td-right fee-val">${xem(row.fee)} XEM</td>
+    <td class="mono-muted">${date.toISOString().slice(0, 16).replace("T", " ")} UTC</td>
+    <td>${timeAgo(date)}</td>
+  </tr>`;
+}
+
+export function txTypeArchiveLoadMoreRow(offset, total, limit, filterType) {
+  if (offset >= total) return "";
+  return `<tr id="tta-load-more-row"><td colspan="8" class="load-more-cell">
+    <button class="load-more-btn"
+            hx-get="/api/txs/more?type=${esc(filterType)}&offset=${offset}&limit=${limit}"
+            hx-target="#tta-load-more-row" hx-swap="outerHTML">
+      <span class="lm-text">Load More</span><span class="lm-spinner"></span>
+    </button>
+  </td></tr>`;
+}
+
+export function txTypeArchiveMoreRows(items, filterType, offset, total, limit) {
+  if (!items.length) return "";
+  return (
+    items.map(renderTxTypeArchiveRow).join("") +
+    txTypeArchiveLoadMoreRow(offset + items.length, total, limit, filterType)
+  );
+}
+
+export function txTypeArchiveListHTML(items, filterType, limit) {
+  if (!items.length)
+    return `<div class="empty-state">No ${esc(filterType)} transactions found</div>`;
+  const total = getTxTypeArchiveCount(filterType);
+  const title = filterType[0].toUpperCase() + filterType.slice(1);
+  return `
+  <div class="card-head">
+    <div class="card-title">${esc(title)} Transactions</div>
+    <span class="total-txt"><strong>${total.toLocaleString("en")}</strong> total</span>
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr>
+      <th>Block</th><th>Sender</th><th>Recipient</th><th>Type</th>
+      <th class="th-right">Amount (XEM)</th><th class="th-right">Fee</th><th>Timestamp</th><th>Age</th>
+    </tr></thead>
+    <tbody>${items.map(renderTxTypeArchiveRow).join("")}${txTypeArchiveLoadMoreRow(items.length, total, limit, filterType)}</tbody>
+  </table></div>`;
+}
+
+// Row renderer for the live unconfirmed-tx pool (see cache.js's
+// fetchUnconfirmedTxs). Unlike the type-archive rows (Task 4), nemtool's
+// unconfirmed feed nests a type-4100 (multisig) record's real transfer
+// under `otherTrans` — confirmed in nemtool's own
+// UnconfirmedTXController.handleTX, the only place that field is used (the
+// regular /tx/list records are flat). No block height yet (unconfirmed), so
+// there's no Block column here, unlike renderTxTypeArchiveRow.
+export function renderUnconfirmedTxRow(tx) {
+  const inner = tx.type === 4100 && tx.otherTrans ? tx.otherTrans : tx;
+  const sender = inner.sender || tx.sender || "";
+  const recipient = inner.recipient || "";
+  const amount = inner.amount || 0;
+  const fee = inner.fee ?? tx.fee ?? 0;
+  const hasRecipient = !!recipient;
+  const toCell = hasRecipient
+    ? `<a href="/account/${esc(recipient)}" class="mono-link" title="${esc(recipient)}">${esc(truncKey(recipient))}</a>`
+    : `<span class="muted">—</span>`;
+  const amountFormatted = hasRecipient
+    ? (amount / 1e6).toLocaleString("en", { minimumFractionDigits: 6, maximumFractionDigits: 6 })
+    : "";
+  const amountCell = hasRecipient ? `${amountFormatted} XEM` : `<span class="muted">—</span>`;
+  const feeFormatted = (fee / 1e6).toLocaleString("en", { minimumFractionDigits: 6, maximumFractionDigits: 6 });
+  const ident = tx.hash || tx.signature || "";
+  return `<tr>
+    <td><a href="/account/${esc(sender)}" class="mono-link" title="${esc(sender)}">${esc(truncKey(sender))}</a></td>
+    <td>${toCell}</td>
+    <td><span class="type-pill ${tx.type === 257 ? "type-transfer" : "type-other"}">${TX_TYPES[tx.type] || `Type ${tx.type}`}</span></td>
+    <td class="td-right">${amountCell}</td>
+    <td class="td-right fee-val">${feeFormatted} XEM</td>
+    <td class="mono-muted" title="${esc(ident)}">${esc(truncHash(ident))}</td>
+    <td>${timeAgo(nemDate(tx.timeStamp))}</td>
+  </tr>`;
+}
+
+export function unconfirmedTxListHTML(items) {
+  if (!items.length)
+    return `<div class="empty-state">No pending transactions right now</div>`;
+  return `
+  <div class="card-head">
+    <div class="card-title">Pending Transactions <span class="live-pill"><span class="live-dot"></span>Live</span></div>
+    <span class="total-txt"><strong>${items.length}</strong> pending</span>
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr>
+      <th>Sender</th><th>Recipient</th><th>Type</th>
+      <th class="th-right">Amount (XEM)</th><th class="th-right">Fee</th><th>Hash</th><th>Age</th>
+    </tr></thead>
+    <tbody>${items.map(renderUnconfirmedTxRow).join("")}</tbody>
+  </table></div>`;
 }
 
 export function globalLoadMoreRow(nextFromBlock) {

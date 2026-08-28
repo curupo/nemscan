@@ -21,6 +21,10 @@ const {
   getMosaicTransfers,
   getMosaicTransfersCount,
   getMaxMosaicTransferNo,
+  upsertTxTypeArchive,
+  getTxTypeArchive,
+  getTxTypeArchiveCount,
+  trimTxTypeArchive,
 } = await import("../src/db.js");
 
 test("mainnet and testnet DB layers are independent", () => {
@@ -127,5 +131,51 @@ test("mosaic_transfers table is isolated between mainnet and testnet", () => {
   });
   networkContext.run("mainnet", () => {
     assert.ok(getMosaicTransfersCount() >= 3);
+  });
+});
+
+test("upsertTxTypeArchive/getTxTypeArchive round-trips and orders by height DESC", () => {
+  networkContext.run("mainnet", () => {
+    upsertTxTypeArchive("transfer", "hashA", 100, "SENDER1", "RECIP1", 5_000_000, 150000, 111, 257);
+    upsertTxTypeArchive("transfer", "hashB", 200, "SENDER2", "RECIP2", 3_000_000, 150000, 222, 257);
+    const rows = getTxTypeArchive("transfer", 10, 0);
+    assert.deepEqual(rows.map((r) => r.hash), ["hashB", "hashA"]);
+  });
+});
+
+test("a hash can be archived under two different filter_types independently", () => {
+  networkContext.run("mainnet", () => {
+    upsertTxTypeArchive("aggregate", "hashDual", 300, "S", "R", 0, 500000, 300, 4100);
+    upsertTxTypeArchive("multisig", "hashDual", 300, "S", "R", 0, 500000, 300, 4100);
+    assert.equal(getTxTypeArchiveCount("aggregate"), 1);
+    assert.equal(getTxTypeArchiveCount("multisig"), 1);
+  });
+});
+
+test("getTxTypeArchive supports offset for pagination", () => {
+  networkContext.run("mainnet", () => {
+    const page1 = getTxTypeArchive("transfer", 1, 0);
+    const page2 = getTxTypeArchive("transfer", 1, 1);
+    assert.notEqual(page1[0].hash, page2[0].hash);
+  });
+});
+
+test("trimTxTypeArchive keeps only the newest `keep` rows for a filter_type and leaves other filter_types untouched", () => {
+  networkContext.run("mainnet", () => {
+    for (let i = 1; i <= 5; i++) {
+      upsertTxTypeArchive("namespace", `hns${i}`, i * 10, "S", "", 0, 150000, i * 10, 8193);
+    }
+    upsertTxTypeArchive("importance", "hns-other", 999, "S", "R", 0, 150000, 999, 2049);
+    trimTxTypeArchive("namespace", 3);
+    assert.equal(getTxTypeArchiveCount("namespace"), 3);
+    const rows = getTxTypeArchive("namespace", 10, 0);
+    assert.deepEqual(rows.map((r) => r.height), [50, 40, 30]);
+    assert.equal(getTxTypeArchiveCount("importance"), 1);
+  });
+});
+
+test("tx_type_archive is isolated between mainnet and testnet", () => {
+  networkContext.run("testnet", () => {
+    assert.equal(getTxTypeArchiveCount("transfer"), 0);
   });
 });

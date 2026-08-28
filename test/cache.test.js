@@ -19,8 +19,18 @@ const {
   refreshDailyTxStats,
   importMosaicTransferArchive,
   refreshMosaicTransfers,
+  importTxTypeArchive,
+  refreshTxTypeArchive,
+  fetchUnconfirmedTxs,
 } = await import("../src/cache.js");
-const { getCachedBlock, getCacheMeta, getMosaicTransfers, getMaxMosaicTransferNo } = await import("../src/db.js");
+const { getCachedBlock, getCacheMeta, getMosaicTransfers, getMaxMosaicTransferNo, getTxTypeArchiveCount, getTxTypeArchive, upsertTxTypeArchive } = await import("../src/db.js");
+// Dynamic import, not a static `import ... from` — a static import is
+// hoisted ahead of *everything* in this module, including the
+// NEMSCAN_DB_DIR assignment above, which would make constants.js (and
+// db.js's NETWORKS through it) resolve against the real repo-root
+// cache.db/cache-testnet.db instead of the scratch dir. See the file-top
+// comment on NEMSCAN_DB_DIR.
+const { TX_LIST_FILTER_TYPES, TX_TYPE_ARCHIVE_WINDOW } = await import("../src/constants.js");
 
 function mockFetchOnce(t, jsonBody, ok = true) {
   t.mock.method(global, "fetch", async () => ({
@@ -254,4 +264,142 @@ test("refreshMosaicTransfers stops instead of looping forever if the server stal
     await refreshMosaicTransfers();
     assert.ok(calls <= 2, `expected the stalled-cursor guard to stop pagination quickly, got ${calls} fetch calls`);
   });
+});
+
+test("importTxTypeArchive fetches one page per filter_type (stopping on a short page) and marks each type's import flag", async (t) => {
+  const requestedTypes = [];
+  t.mock.method(global, "fetch", async (url, opts) => {
+    const body = JSON.parse(opts.body);
+    requestedTypes.push(body.type);
+    return {
+      ok: true,
+      json: async () => [
+        { hash: `h-${body.type}`, height: 100, sender: "S", recipient: "R", amount: 1, fee: 150000, timeStamp: 100, type: 257 },
+      ],
+    };
+  });
+
+  await networkContext.run("mainnet", async () => {
+    const { getDb } = await import("../src/db.js");
+    getDb().exec("DELETE FROM cache_meta WHERE key LIKE 'tx_type_archive_imported_%'");
+    getDb().exec("DELETE FROM tx_type_archive");
+    await importTxTypeArchive();
+    assert.deepEqual(requestedTypes.slice().sort(), TX_LIST_FILTER_TYPES.slice().sort());
+    for (const type of TX_LIST_FILTER_TYPES) {
+      assert.equal(getCacheMeta(`tx_type_archive_imported_${type}`) != null, true);
+    }
+    assert.equal(getTxTypeArchiveCount("transfer"), 1);
+  });
+});
+
+test("importTxTypeArchive skips a filter_type whose import flag is already set", async (t) => {
+  let calls = 0;
+  t.mock.method(global, "fetch", async () => {
+    calls++;
+    return { ok: true, json: async () => [] };
+  });
+  await networkContext.run("mainnet", async () => {
+    const { setCacheMeta } = await import("../src/db.js");
+    for (const type of TX_LIST_FILTER_TYPES) setCacheMeta(`tx_type_archive_imported_${type}`, Date.now());
+    await importTxTypeArchive();
+    assert.equal(calls, 0);
+  });
+});
+
+test("importTxTypeArchive logs and continues past a failure for one filter_type instead of aborting the rest", async (t) => {
+  await networkContext.run("mainnet", async () => {
+    const { getDb } = await import("../src/db.js");
+    getDb().exec("DELETE FROM cache_meta WHERE key LIKE 'tx_type_archive_imported_%'");
+
+    const requestedTypes = [];
+    t.mock.method(global, "fetch", async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      requestedTypes.push(body.type);
+      if (body.type === "namespace") return { ok: false, status: 500, json: async () => [] };
+      return { ok: true, json: async () => [{ hash: `h-${body.type}`, height: 1, sender: "S", recipient: "R", amount: 0, fee: 0, timeStamp: 1, type: 257 }] };
+    });
+
+    await importTxTypeArchive();
+    assert.equal(requestedTypes.length, 6, "expected every filter_type to be attempted even after one fails");
+    assert.equal(getCacheMeta("tx_type_archive_imported_namespace"), null);
+    assert.equal(getCacheMeta("tx_type_archive_imported_transfer") != null, true);
+  });
+});
+
+test("refreshTxTypeArchive only refreshes filter_types whose backfill has completed", async (t) => {
+  await networkContext.run("mainnet", async () => {
+    const { getDb, setCacheMeta } = await import("../src/db.js");
+    getDb().exec("DELETE FROM cache_meta WHERE key LIKE 'tx_type_archive_imported_%'");
+    setCacheMeta("tx_type_archive_imported_transfer", Date.now());
+
+    const requestedTypes = [];
+    t.mock.method(global, "fetch", async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      requestedTypes.push(body.type);
+      return { ok: true, json: async () => [{ hash: "hRefresh", height: 500, sender: "S", recipient: "R", amount: 1, fee: 1, timeStamp: 500, type: 257 }] };
+    });
+
+    await refreshTxTypeArchive();
+    assert.deepEqual(requestedTypes, ["transfer"]);
+  });
+});
+
+test("refreshTxTypeArchive trims each filter_type back down to TX_TYPE_ARCHIVE_WINDOW after topping up", async (t) => {
+  await networkContext.run("mainnet", async () => {
+    const { getDb, setCacheMeta } = await import("../src/db.js");
+    getDb().exec("DELETE FROM cache_meta WHERE key LIKE 'tx_type_archive_imported_%'");
+    getDb().exec("DELETE FROM tx_type_archive WHERE filter_type = 'transfer'");
+    setCacheMeta("tx_type_archive_imported_transfer", Date.now());
+    for (let i = 0; i < TX_TYPE_ARCHIVE_WINDOW; i++) {
+      upsertTxTypeArchive("transfer", `hOld${i}`, i, "S", "R", 1, 1, i, 257);
+    }
+
+    t.mock.method(global, "fetch", async () => ({
+      ok: true,
+      json: async () => [{ hash: "hNew", height: TX_TYPE_ARCHIVE_WINDOW + 1, sender: "S", recipient: "R", amount: 1, fee: 1, timeStamp: 999999, type: 257 }],
+    }));
+
+    await refreshTxTypeArchive();
+    assert.equal(getTxTypeArchiveCount("transfer"), TX_TYPE_ARCHIVE_WINDOW);
+    const rows = getTxTypeArchive("transfer", 1, 0);
+    assert.equal(rows[0].hash, "hNew");
+    assert.equal(
+      getTxTypeArchive("transfer", TX_TYPE_ARCHIVE_WINDOW, 0).some((r) => r.hash === "hOld0"),
+      false,
+      "expected the oldest pre-existing row to have been trimmed",
+    );
+  });
+});
+
+test("refreshTxTypeArchive catches a failure for one filter_type and continues with the others", async (t) => {
+  await networkContext.run("mainnet", async () => {
+    const { getDb, setCacheMeta } = await import("../src/db.js");
+    getDb().exec("DELETE FROM cache_meta WHERE key LIKE 'tx_type_archive_imported_%'");
+    for (const type of TX_LIST_FILTER_TYPES) setCacheMeta(`tx_type_archive_imported_${type}`, Date.now());
+
+    const requestedTypes = [];
+    t.mock.method(global, "fetch", async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      requestedTypes.push(body.type);
+      if (body.type === "namespace") return { ok: false, status: 500, json: async () => [] };
+      return { ok: true, json: async () => [] };
+    });
+
+    await refreshTxTypeArchive();
+    assert.equal(requestedTypes.length, 6, "expected every filter_type to be attempted even after one fails");
+  });
+});
+
+test("fetchUnconfirmedTxs posts to nemtool's unconfirmedTXList endpoint and returns its array", async (t) => {
+  t.mock.method(global, "fetch", async (url) => {
+    assert.equal(String(url), "https://explorer.nemtool.com/tx/unconfirmedTXList");
+    return { ok: true, json: async () => [{ hash: "hPending", type: 257 }] };
+  });
+  const items = await fetchUnconfirmedTxs();
+  assert.deepEqual(items, [{ hash: "hPending", type: 257 }]);
+});
+
+test("fetchUnconfirmedTxs throws on a non-ok response", async (t) => {
+  t.mock.method(global, "fetch", async () => ({ ok: false, status: 500, json: async () => [] }));
+  await assert.rejects(() => fetchUnconfirmedTxs(), /status 500/);
 });

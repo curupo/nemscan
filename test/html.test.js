@@ -21,13 +21,20 @@ const {
   nodesListHTML,
   navHTML,
   heroMosaicTransfers,
+  heroTxs,
   renderMosaicTransferRow,
   mosaicTransferMoreRows,
   mosaicTransfersListHTML,
   mosaicDetailHTML,
+  typeSwitch,
+  renderTxTypeArchiveRow,
+  txTypeArchiveListHTML,
+  txTypeArchiveMoreRows,
+  renderUnconfirmedTxRow,
+  unconfirmedTxListHTML,
 } = await import("../src/html.js");
 const { refreshNodeOptions } = await import("../src/nodePool.js");
-const { upsertMosaicTransfer } = await import("../src/db.js");
+const { upsertMosaicTransfer, upsertTxTypeArchive } = await import("../src/db.js");
 
 test("globalTxMoreRows keeps the Load More control when a scan window finds zero txs but the chain isn't exhausted", () => {
   // getTxsFromBlocks legitimately returns items: [] with nextFromBlock >= 1
@@ -227,4 +234,128 @@ test("mosaicDetailHTML renders a Recent Transfers section and a View all link on
     assert.match(html, /View all transfers/);
     assert.match(html, /\/mosaictransfer\?ns=dim&m=coin/);
   });
+});
+
+test("typeSwitch marks 'All' active when no type is given, and links straight to /txs", () => {
+  const html = typeSwitch(null);
+  assert.match(html, /class="rows-menu-item active" href="\/txs" role="menuitem">All</);
+});
+
+test("typeSwitch marks the matching item active for a given type", () => {
+  const html = typeSwitch("importance");
+  assert.match(html, /class="rows-menu-item active" href="\/txs\?type=importance" role="menuitem">Importance</);
+  assert.doesNotMatch(html, /class="rows-menu-item active" href="\/txs" role/);
+});
+
+test("typeSwitch marks Pending active for the 'pending' pseudo-type", () => {
+  const html = typeSwitch("pending");
+  assert.match(html, /class="rows-menu-item active" href="\/txs\/unconfirmed" role="menuitem">Pending</);
+});
+
+test("typeSwitch links Mosaic to the existing /mosaictransfer page, never a type= query", () => {
+  const html = typeSwitch(null);
+  assert.match(html, /href="\/mosaictransfer" role="menuitem">Mosaic</);
+});
+
+test("typeSwitch's button label reflects the current selection", () => {
+  assert.match(typeSwitch(null), /rows-switch-label">All</);
+  assert.match(typeSwitch("apostille"), /rows-switch-label">Apostille</);
+});
+
+test("heroTxs embeds the type dropdown", () => {
+  const html = heroTxs("transfer");
+  assert.match(html, /rows-switch-label">Transfer</);
+  assert.match(html, /<h1>Transactions<\/h1>/);
+});
+
+test("renderTxTypeArchiveRow shows an em-dash for Recipient/Amount when the row has no recipient (namespace/aggregate-style)", () => {
+  const html = renderTxTypeArchiveRow({ hash: "h1", height: 100, sender: "SENDERADDR", recipient: "", amount: 0, fee: 150000, time_stamp: 100, type: 8193 });
+  assert.match(html, /<span class="muted">—<\/span>/);
+  assert.doesNotMatch(html, /href="\/account\/"/);
+});
+
+test("renderTxTypeArchiveRow links a real recipient and shows its amount (importance/multisig-style)", () => {
+  const html = renderTxTypeArchiveRow({ hash: "h2", height: 100, sender: "S", recipient: "RECIPADDR", amount: 0, fee: 150000, time_stamp: 100, type: 2049 });
+  assert.match(html, /href="\/account\/RECIPADDR"/);
+});
+
+test("renderTxTypeArchiveRow links Block to the block detail page", () => {
+  const html = renderTxTypeArchiveRow({ hash: "h4", height: 12345, sender: "S", recipient: "R", amount: 1, fee: 1, time_stamp: 100, type: 257 });
+  assert.match(html, /href="\/block\/12345"/);
+});
+
+test("renderTxTypeArchiveRow escapes sender/recipient, which come from a third-party archive rather than this app's own validated addresses", () => {
+  const html = renderTxTypeArchiveRow({ hash: "h3", height: 100, sender: '"><script>1</script>', recipient: '"><script>2</script>', amount: 1, fee: 1, time_stamp: 100, type: 257 });
+  assert.doesNotMatch(html, /<script>/);
+});
+
+test("txTypeArchiveListHTML shows a type-specific empty state", () => {
+  assert.match(txTypeArchiveListHTML([], "apostille", 25), /No apostille transactions found/);
+});
+
+test("txTypeArchiveListHTML renders rows and reflects getTxTypeArchiveCount for the total", () => {
+  networkContext.run("mainnet", () => {
+    upsertTxTypeArchive("transfer", "hList", 500, "S", "R", 1_000_000, 150000, 500, 257);
+    const html = txTypeArchiveListHTML([{ hash: "hList", height: 500, sender: "S", recipient: "R", amount: 1_000_000, fee: 150000, time_stamp: 500, type: 257 }], "transfer", 25);
+    assert.match(html, /Transfer Transactions/);
+    assert.match(html, /<strong>1<\/strong> total/);
+  });
+});
+
+test("txTypeArchiveMoreRows drops the Load More control once offset reaches total", () => {
+  const items = [{ hash: "h", height: 1, sender: "S", recipient: "R", amount: 1, fee: 1, time_stamp: 1, type: 257 }];
+  const html = txTypeArchiveMoreRows(items, "transfer", 0, 1, 25);
+  assert.doesNotMatch(html, /Load More/);
+});
+
+test("txTypeArchiveMoreRows keeps the Load More control, with the type and offset preserved in its URL, when more remain", () => {
+  const items = [{ hash: "h", height: 1, sender: "S", recipient: "R", amount: 1, fee: 1, time_stamp: 1, type: 257 }];
+  const html = txTypeArchiveMoreRows(items, "transfer", 0, 5, 25);
+  assert.match(html, /Load More/);
+  assert.match(html, /\/api\/txs\/more\?type=transfer&offset=1&limit=25/);
+});
+
+test("renderUnconfirmedTxRow unwraps a multisig (type 4100) record's otherTrans for sender/recipient/amount/fee", () => {
+  const tx = {
+    hash: "hUnconfirmed", type: 4100, timeStamp: 100,
+    otherTrans: { sender: "INNERSENDER", recipient: "INNERRECIP", amount: 7_000_000, fee: 150000 },
+  };
+  const html = renderUnconfirmedTxRow(tx);
+  assert.match(html, /href="\/account\/INNERSENDER"/);
+  assert.match(html, /href="\/account\/INNERRECIP"/);
+  assert.match(html, />7\.000000 XEM</);
+});
+
+test("renderUnconfirmedTxRow renders a plain transfer directly (no otherTrans)", () => {
+  const tx = { hash: "hPlain", type: 257, sender: "S", recipient: "R", amount: 1_000_000, fee: 150000, timeStamp: 100 };
+  const html = renderUnconfirmedTxRow(tx);
+  assert.match(html, /href="\/account\/S"/);
+  assert.match(html, /href="\/account\/R"/);
+  assert.match(html, />1\.000000 XEM</);
+});
+
+test("renderUnconfirmedTxRow falls back to signature when hash is absent", () => {
+  const tx = { signature: "sig123abc", type: 257, sender: "S", recipient: "R", amount: 1, fee: 1, timeStamp: 100 };
+  const html = renderUnconfirmedTxRow(tx);
+  assert.match(html, /sig123abc/);
+});
+
+test("renderUnconfirmedTxRow escapes sender/recipient, which come from a third-party feed", () => {
+  const tx = { hash: "h", type: 257, sender: '"><script>1</script>', recipient: '"><script>2</script>', amount: 1, fee: 1, timeStamp: 100 };
+  assert.doesNotMatch(renderUnconfirmedTxRow(tx), /<script>/);
+});
+
+test("unconfirmedTxListHTML shows an empty state when the pool is empty", () => {
+  assert.match(unconfirmedTxListHTML([]), /No pending transactions right now/);
+});
+
+test("unconfirmedTxListHTML renders a row per item and the pending count", () => {
+  const items = [
+    { hash: "h1", type: 257, sender: "S", recipient: "R", amount: 1, fee: 1, timeStamp: 100 },
+    { hash: "h2", type: 257, sender: "S2", recipient: "R2", amount: 1, fee: 1, timeStamp: 100 },
+  ];
+  const html = unconfirmedTxListHTML(items);
+  assert.match(html, /<strong>2<\/strong> pending/);
+  assert.match(html, /href="\/account\/S"/);
+  assert.match(html, /href="\/account\/S2"/);
 });

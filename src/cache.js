@@ -18,6 +18,8 @@ import {
   upsertBlock,
   upsertMosaicTransfer,
   getMaxMosaicTransferNo,
+  upsertTxTypeArchive,
+  trimTxTypeArchive,
 } from "./db.js";
 import {
   nemFetch,
@@ -31,6 +33,8 @@ import {
   DAILY_TX_BACKFILL_CHUNK,
   ARCHIVE_PAGE_DELAY_MS,
   DEEP_REFRESH_BATCH_DELAY_MS,
+  TX_LIST_FILTER_TYPES,
+  TX_TYPE_ARCHIVE_WINDOW,
 } from "./constants.js";
 import { currentNetwork, networkContext } from "./context.js";
 
@@ -721,4 +725,130 @@ export function scheduleDailyTxStatsRefresh(network) {
       : 5 * 1000;
     setTimeout(() => scheduleDailyTxStatsRefresh(network), delay);
   });
+}
+
+// ── Transaction type archive ─────────────────────────────────────────────────
+
+const NEMTOOL_TX_LIST_URL = "https://explorer.nemtool.com/tx/list";
+const NEMTOOL_TX_UNCONFIRMED_URL = "https://explorer.nemtool.com/tx/unconfirmedTXList";
+// nemtool's /tx/list page size is fixed server-side at 10 regardless of any
+// pageSize sent — confirmed live; only `page` and `type` actually affect the
+// response. A page shorter than this means that filter_type is exhausted.
+const NEMTOOL_TX_LIST_PAGE_SIZE = 10;
+
+// One-time backfill per filter_type, each independently guarded by its own
+// cache_meta flag (tx_type_archive_imported_<type>) rather than one flag for
+// the whole function — so a transient failure fetching e.g. "namespace"
+// doesn't also block "transfer" from ever completing, and a restart only
+// retries the type(s) that didn't finish. Stops each type's backfill once
+// TX_TYPE_ARCHIVE_WINDOW records have been seen or a page comes back
+// shorter than NEMTOOL_TX_LIST_PAGE_SIZE (exhausted) — unlike
+// importMosaicTransferArchive, no resumable cursor is needed: worst case is
+// ~50 requests per type, a small one-time cost, not an open-ended walk.
+export async function importTxTypeArchive() {
+  for (const filterType of TX_LIST_FILTER_TYPES) {
+    const metaKey = `tx_type_archive_imported_${filterType}`;
+    if (getCacheMeta(metaKey)) continue;
+    try {
+      let seen = 0;
+      let page = 1;
+      while (seen < TX_TYPE_ARCHIVE_WINDOW) {
+        const res = await fetch(NEMTOOL_TX_LIST_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ page, type: filterType }),
+        });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const batch = await res.json();
+        if (!Array.isArray(batch) || !batch.length) break;
+        for (const item of batch) {
+          upsertTxTypeArchive(
+            filterType,
+            item.hash,
+            item.height,
+            item.sender,
+            item.recipient,
+            item.amount || 0,
+            item.fee || 0,
+            item.timeStamp,
+            item.type,
+          );
+        }
+        seen += batch.length;
+        if (batch.length < NEMTOOL_TX_LIST_PAGE_SIZE) break;
+        page++;
+        await new Promise((r) => setTimeout(r, ARCHIVE_PAGE_DELAY_MS));
+      }
+      setCacheMeta(metaKey, Date.now());
+    } catch (err) {
+      console.error(`Tx type archive import failed for type=${filterType}:`, err.message);
+    }
+  }
+}
+
+const _refreshingTxTypeArchive = { mainnet: false, testnet: false };
+
+// Ongoing top-up: fetches just the newest page (page: 1) per filter_type
+// whose backfill has completed, upserts it (idempotent via INSERT OR
+// REPLACE), then trims back to TX_TYPE_ARCHIVE_WINDOW. Unlike
+// refreshMosaicTransfers, this never needs to walk forward hunting for "how
+// far behind are we" — the window is bounded and trimmed every run
+// regardless, so only the newest page is ever needed. Each filter_type is
+// wrapped in its own try/catch so one failing type doesn't stop the others.
+export async function refreshTxTypeArchive() {
+  const network = currentNetwork();
+  if (_refreshingTxTypeArchive[network]) return;
+  _refreshingTxTypeArchive[network] = true;
+  try {
+    for (const filterType of TX_LIST_FILTER_TYPES) {
+      if (!getCacheMeta(`tx_type_archive_imported_${filterType}`)) continue;
+      try {
+        const res = await fetch(NEMTOOL_TX_LIST_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ page: 1, type: filterType }),
+        });
+        if (!res.ok) throw new Error(`status ${res.status}`);
+        const batch = await res.json();
+        if (Array.isArray(batch)) {
+          for (const item of batch) {
+            upsertTxTypeArchive(
+              filterType,
+              item.hash,
+              item.height,
+              item.sender,
+              item.recipient,
+              item.amount || 0,
+              item.fee || 0,
+              item.timeStamp,
+              item.type,
+            );
+          }
+        }
+        trimTxTypeArchive(filterType, TX_TYPE_ARCHIVE_WINDOW);
+      } catch (err) {
+        console.error(`Tx type archive refresh failed for type=${filterType}:`, err.message);
+      }
+    }
+  } finally {
+    _refreshingTxTypeArchive[network] = false;
+  }
+}
+
+// Live proxy for the unconfirmed-tx pool — NIS1 has no "list all unconfirmed
+// transactions" endpoint (confirmed live: POST /transactions/unconfirmed is
+// actually the *announce* endpoint, not a list). nemtool runs its own
+// backend that tracks the pool and exposes it via this POST. Unlike
+// everything else in this file, this is never stored locally — the pool
+// changes constantly and has no archival value, so every call to this
+// function hits nemtool fresh.
+export async function fetchUnconfirmedTxs() {
+  const res = await fetch(NEMTOOL_TX_UNCONFIRMED_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(`status ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
 }
