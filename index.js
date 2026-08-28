@@ -724,7 +724,6 @@ app.get("/api/mosaictransfer", async (req, res) => {
   const filter = mosaicFilterFromQuery(req.query);
   try {
     const items = getMosaicTransfers(limit, 0, filter.ns, filter.m);
-    res.setHeader("Content-Type", "text/html");
     res.send(mosaicTransfersListHTML(items, limit, filter));
   } catch (err) {
     res.status(503).setHeader("Content-Type", "text/html");
@@ -745,7 +744,6 @@ app.get("/api/mosaictransfer/more", async (req, res) => {
   try {
     const items = getMosaicTransfers(limit, offset, filter.ns, filter.m);
     const total = getMosaicTransfersCount(filter.ns, filter.m);
-    res.setHeader("Content-Type", "text/html");
     res.send(mosaicTransferMoreRows(items, offset, total, limit, filter));
   } catch (err) {
     res.status(503).setHeader("Content-Type", "text/html");
