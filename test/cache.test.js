@@ -201,3 +201,40 @@ test("refreshMosaicTransfers walks forward from the local max and stops once it 
     assert.ok(!rows.some((r) => r.hash === "duplicate-should-not-happen"));
   });
 });
+
+test("refreshMosaicTransfers continues past a short intermediate page instead of stopping early", async (t) => {
+  await networkContext.run("mainnet", async () => {
+    const localMaxBefore = getMaxMosaicTransferNo();
+    const page1 = [
+      { no: localMaxBefore + 20, hash: "hFar2", namespace: "dim", mosaic: "coin", quantity: 1, div: 6, sender: "SP", recipient: "RP", timeStamp: 900 },
+      { no: localMaxBefore + 10, hash: "hFar1", namespace: "dim", mosaic: "coin", quantity: 1, div: 6, sender: "SQ", recipient: "RQ", timeStamp: 800 },
+    ];
+    const page2 = [
+      { no: localMaxBefore, hash: "hKnown", namespace: "dim", mosaic: "coin", quantity: 1, div: 6, sender: "SR", recipient: "RR", timeStamp: 700 },
+    ];
+    let calls = 0;
+    t.mock.method(global, "fetch", async (url, opts) => {
+      calls++;
+      const body = JSON.parse(opts.body);
+      const batch = (body.no ?? null) === null ? page1 : page2;
+      return { ok: true, json: async () => batch };
+    });
+
+    await refreshMosaicTransfers();
+    // page1's 2 records are upserted regardless of whether the loop then
+    // continues (they're processed before the break check runs), so the
+    // real signal that page2 was actually fetched is the call count, not
+    // page1's own records.
+    assert.equal(
+      calls,
+      2,
+      "expected a second fetch for page2 even though page1 came back short (only 2 of the page-size-50 records)",
+    );
+    assert.equal(getMaxMosaicTransferNo(), localMaxBefore + 20);
+    const rows = getMosaicTransfers(10, 0);
+    assert.ok(
+      rows.some((r) => r.no === localMaxBefore + 10),
+      "expected the second (short, non-final) page to have been fetched and its record persisted",
+    );
+  });
+});

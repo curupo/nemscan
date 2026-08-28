@@ -337,9 +337,9 @@ const NEMTOOL_MOSAIC_TRANSFER_LIST_URL =
 // function) plus an ongoing top-up (refreshMosaicTransfers below). It's
 // also expected to be far larger than the namespace/mosaic archives (a
 // single active mosaic can recur almost daily across 10 years), so there's
-// no page-count cap — loop until a page comes back short — and progress is
-// checkpointed to cache_meta every page so a restart mid-import resumes
-// instead of starting over from scratch.
+// no page-count cap — loop until a page comes back empty (or the cursor
+// stalls) — and progress is checkpointed to cache_meta every page so a
+// restart mid-import resumes instead of starting over from scratch.
 export async function importMosaicTransferArchive() {
   if (getCacheMeta("mosaic_transfers_archive_imported")) return;
   let cursor = parseInt(getCacheMeta("mosaic_transfer_archive_cursor")) || null;
@@ -434,7 +434,7 @@ export async function refreshMosaicTransfers() {
         );
         fetched++;
       }
-      if (reachedKnown || batch.length < 50) break;
+      if (reachedKnown) break;
       cursor = batch[batch.length - 1].no;
       await new Promise((r) => setTimeout(r, ARCHIVE_PAGE_DELAY_MS));
     }
