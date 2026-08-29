@@ -23,6 +23,7 @@ import {
   decodeMsg,
 } from "./helpers.js";
 import { nodeContext, currentNetwork } from "./context.js";
+import { computeTransferTxHash } from "./txHash.js";
 import { getNodeOptions, getNodeOptionsUpdatedAt, getAutoBestNode } from "./nodePool.js";
 import { TX_TYPES, XEM_TOTAL_SUPPLY, DAILY_TX_DAYS, NETWORKS, TX_LIST_FILTER_TYPES } from "./constants.js";
 
@@ -1015,6 +1016,8 @@ export function blockDetailHTML(block, chainHeight) {
               const d = {
                 idx: i + 1,
                 type: TX_TYPES[tx.type] || `Type ${tx.type}`,
+                hash: isT ? computeTransferTxHash(tx) || "" : "",
+                ts: tx.timeStamp,
                 sender: senderAddr,
                 recipient: isT ? tx.recipient : "",
                 amount: isT ? `${xem(tx.amount)} XEM` : "",
@@ -1062,6 +1065,7 @@ export function blockDetailHTML(block, chainHeight) {
         var blockHeight = ${block.height};
         var rows = [
           ['#', '<span class="mono">'+d.idx+'</span>'],
+          ['Transaction Hash', d.hash ? ('<a href="/tx/'+d.hash+'?height='+blockHeight+'&ts='+d.ts+'" class="mono-link" title="'+d.hash+'">'+d.hash+'</a> <button class="copy-btn" onclick="copy(\\''+d.hash+'\\')">copy</button>') : '<span class="muted">—</span>'],
           ['Block', '<a href="/block/'+blockHeight+'" class="mono-link">'+blockHeight.toLocaleString()+'</a>'],
           ['Timestamp', '<span class="mono-muted">'+d.time+'</span>'],
           ['Type', '<span class="type-pill '+(d.recipient ? 'type-transfer' : 'type-other')+'">'+d.type+'</span>'],
@@ -1351,8 +1355,15 @@ export function renderGlobalTxRow(item) {
   const amountCell = isTransfer
     ? `${xem(tx.amount)} XEM`
     : `<span class="muted">—</span>`;
+  // Only Transfer (type 257) has a hash computable here — see txHash.js for why
+  // the other tx types aren't supported.
+  const hash = isTransfer ? computeTransferTxHash(tx) : null;
+  const hashCell = hash
+    ? `<a href="/tx/${hash}?height=${height}&ts=${tx.timeStamp}" class="tx-hash" title="${hash}">${truncHash(hash)}</a>`
+    : `<span class="muted">—</span>`;
 
   return `<tr>
+    <td>${hashCell}</td>
     <td><a href="/block/${height}" class="blk-link">${height}</a></td>
     <td><a href="/account/${senderAddr}" class="mono-link" title="${senderAddr}">${truncKey(senderAddr)}</a></td>
     <td>${toCell}</td>
@@ -1385,7 +1396,11 @@ export function renderTxTypeArchiveRow(row) {
     ? `${xem(row.amount)} XEM`
     : `<span class="muted">—</span>`;
   const date = nemDate(row.time_stamp);
+  const hashCell = row.hash
+    ? `<a href="/tx/${esc(row.hash)}?height=${esc(String(row.height))}&ts=${esc(String(row.time_stamp))}" class="tx-hash" title="${esc(row.hash)}">${esc(truncHash(row.hash))}</a>`
+    : `<span class="muted">—</span>`;
   return `<tr>
+    <td>${hashCell}</td>
     <td><a href="/block/${esc(String(row.height))}" class="blk-link">${esc(String(row.height))}</a></td>
     <td><a href="/account/${esc(row.sender)}" class="mono-link" title="${esc(row.sender)}">${esc(truncKey(row.sender))}</a></td>
     <td>${toCell}</td>
@@ -1399,7 +1414,7 @@ export function renderTxTypeArchiveRow(row) {
 
 export function txTypeArchiveLoadMoreRow(offset, total, limit, filterType) {
   if (offset >= total) return "";
-  return `<tr id="tta-load-more-row"><td colspan="8" class="load-more-cell">
+  return `<tr id="tta-load-more-row"><td colspan="9" class="load-more-cell">
     <button class="load-more-btn"
             hx-get="/api/txs/more?type=${esc(filterType)}&offset=${offset}&limit=${limit}"
             hx-target="#tta-load-more-row" hx-swap="outerHTML">
@@ -1428,7 +1443,7 @@ export function txTypeArchiveListHTML(items, filterType, limit) {
   </div>
   <div class="tbl-wrap"><table>
     <thead><tr>
-      <th>Block</th><th>Sender</th><th>Recipient</th><th>Type</th>
+      <th>Txn Hash</th><th>Block</th><th>Sender</th><th>Recipient</th><th>Type</th>
       <th class="th-right">Amount (XEM)</th><th class="th-right">Fee</th><th>Timestamp</th><th>Age</th>
     </tr></thead>
     <tbody>${items.map(renderTxTypeArchiveRow).join("")}${txTypeArchiveLoadMoreRow(items.length, total, limit, filterType)}</tbody>
@@ -1488,7 +1503,7 @@ export function unconfirmedTxListHTML(items) {
 
 export function globalLoadMoreRow(nextFromBlock) {
   if (nextFromBlock < 1) return "";
-  return `<tr id="txs-load-more-row"><td colspan="8" class="load-more-cell">
+  return `<tr id="txs-load-more-row"><td colspan="9" class="load-more-cell">
     <button class="load-more-btn"
             hx-get="/api/txs/more?fromBlock=${nextFromBlock}"
             hx-target="#txs-load-more-row" hx-swap="outerHTML">
@@ -1507,7 +1522,7 @@ export function globalTxTableHTML(items, chainHeight, nextFromBlock) {
   </div>
   <div class="tbl-wrap"><table>
     <thead><tr>
-      <th>Block</th><th>Sender</th><th>Recipient</th><th>Type</th>
+      <th>Txn Hash</th><th>Block</th><th>Sender</th><th>Recipient</th><th>Type</th>
       <th class="th-right">Amount (XEM)</th><th class="th-right">Fee</th><th>Timestamp</th><th>Age</th>
     </tr></thead>
     <tbody>${items.map(renderGlobalTxRow).join("")}${globalLoadMoreRow(nextFromBlock)}</tbody>
