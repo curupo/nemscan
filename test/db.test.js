@@ -34,6 +34,7 @@ const {
   getExchangeList,
   getBlocksHeightRange,
   getBlocksInRange,
+  getDb,
 } = await import("../src/db.js");
 
 test("mainnet and testnet DB layers are independent", () => {
@@ -281,17 +282,16 @@ test("exchange_addresses and exchange_daily_flows are isolated between mainnet a
 });
 
 test("getBlocksHeightRange returns null/null when no blocks are cached, and the actual min/max otherwise", () => {
-  // Note: mainnet and testnet may have blocks from prior tests, so we verify the function works
+  networkContext.run("testnet", () => {
+    getDb().exec("DELETE FROM blocks");
+    assert.deepEqual(getBlocksHeightRange(), { minHeight: null, maxHeight: null });
+  });
   networkContext.run("mainnet", () => {
-    // Get the range before adding new blocks
-    const rangeBefore = getBlocksHeightRange();
-    // Add new blocks with higher heights to verify they're included
-    upsertBlock(950, 950, JSON.stringify({ height: 950 }));
-    upsertBlock(999, 999, JSON.stringify({ height: 999 }));
-    const rangeAfter = getBlocksHeightRange();
-    // Verify the range includes the new high and didn't lose the min
-    assert.ok(rangeAfter.minHeight <= rangeBefore.minHeight || rangeBefore.minHeight === null);
-    assert.equal(rangeAfter.maxHeight, 999); // New high should be 999
+    getDb().exec("DELETE FROM blocks");
+    upsertBlock(500, 500, JSON.stringify({ height: 500 }));
+    upsertBlock(510, 510, JSON.stringify({ height: 510 }));
+    upsertBlock(505, 505, JSON.stringify({ height: 505 }));
+    assert.deepEqual(getBlocksHeightRange(), { minHeight: 500, maxHeight: 510 });
   });
 });
 
