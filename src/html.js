@@ -1513,7 +1513,14 @@ export function globalLoadMoreRow(nextFromBlock) {
 }
 
 export function globalTxTableHTML(items, chainHeight, nextFromBlock) {
-  if (!items.length)
+  // getTxsFromBlocks can legitimately return items: [] with nextFromBlock >= 1
+  // when its first scan window (MAX_BLOCK_SCAN_DEPTH / MAX_BLOCK_SCAN_MS) is
+  // capped before finding a transaction — e.g. a real lull in mainnet
+  // activity, or a bad node in the "Auto" pool. That must not be reported as
+  // a terminal "no transactions found": nextFromBlock alone signals whether
+  // there's more chain left to walk (see globalTxMoreRows / globalLoadMoreRow,
+  // which already handle this for subsequent pages).
+  if (!items.length && nextFromBlock < 1)
     return `<div class="empty-state">No transactions found in recent blocks</div>`;
   return `
   <div class="card-head">

@@ -15,6 +15,7 @@ import { networkContext } from "../src/context.js";
 process.env.NEMSCAN_DB_DIR = mkdtempSync(join(tmpdir(), "nemscan-html-test-"));
 
 const {
+  globalTxTableHTML,
   globalTxMoreRows,
   renderNodeRow,
   nodeSwitchHTML,
@@ -59,6 +60,29 @@ test("globalTxMoreRows keeps the Load More control when a scan window finds zero
 test("globalTxMoreRows drops the Load More control once the chain is exhausted", () => {
   const html = globalTxMoreRows([], 0);
   assert.equal(html, "");
+});
+
+test("globalTxTableHTML keeps paginating when the first scan window finds zero txs but the chain isn't exhausted", () => {
+  // Same open-ended-scan caveat as globalTxMoreRows above, but for the very
+  // first page: getTxsFromBlocks can legitimately return items: [] with
+  // nextFromBlock >= 1 when the newest MAX_BLOCK_SCAN_DEPTH/MAX_BLOCK_SCAN_MS
+  // window of the chain happens to be sparse (e.g. a real multi-hour lull in
+  // mainnet activity). That must not be reported as a terminal "no
+  // transactions found" — the caller can still page further back via
+  // nextFromBlock.
+  const html = globalTxTableHTML([], 5817885, 5817385);
+
+  assert.doesNotMatch(
+    html,
+    /No transactions found/,
+    "an unexhausted empty scan must not show the terminal empty state",
+  );
+  assert.match(html, /fromBlock=5817385/);
+});
+
+test("globalTxTableHTML shows the terminal empty state once the chain is exhausted", () => {
+  const html = globalTxTableHTML([], 5817885, 0);
+  assert.match(html, /No transactions found/);
 });
 
 test("renderNodeRow shows an HTTP badge for a protocol:http node", () => {
