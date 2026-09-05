@@ -475,22 +475,49 @@ test("extractExchangeFlowsFromBlock is a no-op for an empty watch map", () => {
 
 test("extractExchangeFlowsFromBlock excludes mosaic-attached transfers (tx.amount is a multiplier, not XEM, when mosaics are present)", () => {
   networkContext.run("mainnet", () => {
+    upsertExchangeAddress("NMOSAICWATCH1", "MosaicTestEx", "MosaicTestEx -- Exchange");
     const watchMap = new Map([["NMOSAICWATCH1", "MosaicTestEx"]]);
-    const block = {
-      timeStamp: 5500,
-      transactions: [
-        {
-          type: 257,
-          signer: "ee".repeat(32),
-          recipient: "NMOSAICWATCH1",
-          amount: 1_000_000,
-          mosaics: [{ mosaicId: { namespaceId: "some", name: "mosaic" }, quantity: 5 }],
-        },
-      ],
-    };
-    extractExchangeFlowsFromBlock(block, watchMap);
-    const rows = getExchangeDailyFlows("MosaicTestEx", 5);
-    assert.equal(rows.length, 0, "a mosaic-attached transfer must not be counted as XEM inflow");
+
+    // Mosaic-attached transfer: tx.amount here is a multiplier, not XEM — must be excluded.
+    extractExchangeFlowsFromBlock(
+      {
+        timeStamp: 5500,
+        transactions: [
+          {
+            type: 257,
+            signer: "ee".repeat(32),
+            recipient: "NMOSAICWATCH1",
+            amount: 1_000_000,
+            mosaics: [{ mosaicId: { namespaceId: "some", name: "mosaic" }, quantity: 5 }],
+          },
+        ],
+      },
+      watchMap,
+    );
+    assert.equal(
+      getExchangeDailyFlows("MosaicTestEx", 5).reduce((sum, r) => sum + r.inflow, 0),
+      0,
+      "a mosaic-attached transfer must not be counted as XEM inflow",
+    );
+
+    // Control: the identical transaction WITHOUT a mosaics array is a plain
+    // XEM transfer and MUST be recorded — proves the exclusion above is
+    // actually exercising the mosaics check, not some unrelated reason
+    // nothing got recorded (e.g. the address never being registered).
+    extractExchangeFlowsFromBlock(
+      {
+        timeStamp: 5501,
+        transactions: [
+          { type: 257, signer: "ee".repeat(32), recipient: "NMOSAICWATCH1", amount: 2_000_000 },
+        ],
+      },
+      watchMap,
+    );
+    assert.equal(
+      getExchangeDailyFlows("MosaicTestEx", 5).reduce((sum, r) => sum + r.inflow, 0),
+      2_000_000,
+      "a plain (non-mosaic) transfer to the same watched address must still be recorded",
+    );
   });
 });
 
