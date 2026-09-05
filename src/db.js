@@ -79,6 +79,21 @@ function openDbLayer(file) {
       time_stamp INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_mosaic_transfers_ns_mosaic ON mosaic_transfers(namespace, mosaic);
+    CREATE TABLE IF NOT EXISTS exchange_addresses (
+      address TEXT PRIMARY KEY,
+      exchange_name TEXT NOT NULL,
+      label TEXT,
+      backfilled INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_exchange_addresses_name ON exchange_addresses(exchange_name);
+    CREATE TABLE IF NOT EXISTS exchange_daily_flows (
+      date TEXT NOT NULL,
+      address TEXT NOT NULL,
+      inflow INTEGER NOT NULL DEFAULT 0,
+      outflow INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (date, address)
+    );
+    CREATE INDEX IF NOT EXISTS idx_exchange_daily_flows_date ON exchange_daily_flows(date);
     CREATE TABLE IF NOT EXISTS tx_type_archive (
       filter_type TEXT NOT NULL,
       hash TEXT NOT NULL,
@@ -257,6 +272,48 @@ function openDbLayer(file) {
         SELECT hash FROM tx_type_archive WHERE filter_type = ? ORDER BY height DESC, hash LIMIT ?
       )
   `);
+  const _exAddrUpsertStmt = db.prepare(
+    "INSERT OR IGNORE INTO exchange_addresses (address, exchange_name, label, backfilled) VALUES (?, ?, ?, 0)",
+  );
+  const _exAddrAllStmt = db.prepare(
+    "SELECT address, exchange_name, label, backfilled FROM exchange_addresses ORDER BY address ASC",
+  );
+  const _exAddrPendingStmt = db.prepare(
+    "SELECT address, exchange_name FROM exchange_addresses WHERE backfilled = 0",
+  );
+  const _exAddrMarkBackfilledStmt = db.prepare(
+    "UPDATE exchange_addresses SET backfilled = 1 WHERE address = ?",
+  );
+  const _exFlowBumpStmt = db.prepare(`
+    INSERT INTO exchange_daily_flows (date, address, inflow, outflow) VALUES (?, ?, ?, ?)
+    ON CONFLICT(date, address) DO UPDATE SET inflow = inflow + excluded.inflow, outflow = outflow + excluded.outflow
+  `);
+  const _exFlowByExchangeStmt = db.prepare(`
+    SELECT f.date AS date, SUM(f.inflow) AS inflow, SUM(f.outflow) AS outflow
+    FROM exchange_daily_flows f
+    JOIN exchange_addresses a ON a.address = f.address
+    WHERE a.exchange_name = ?
+    GROUP BY f.date
+    ORDER BY f.date DESC
+    LIMIT ?
+  `);
+  const _exListStmt = db.prepare(`
+    SELECT
+      a.exchange_name AS exchange_name,
+      COUNT(DISTINCT a.address) AS address_count,
+      COALESCE(SUM(CASE WHEN f.date >= date('now', '-7 day') THEN f.inflow ELSE 0 END), 0) AS inflow_7d,
+      COALESCE(SUM(CASE WHEN f.date >= date('now', '-7 day') THEN f.outflow ELSE 0 END), 0) AS outflow_7d
+    FROM exchange_addresses a
+    LEFT JOIN exchange_daily_flows f ON f.address = a.address
+    GROUP BY a.exchange_name
+    ORDER BY a.exchange_name ASC
+  `);
+  const _blocksRangeStmt = db.prepare(
+    "SELECT MIN(height) AS minHeight, MAX(height) AS maxHeight FROM blocks",
+  );
+  const _blocksInRangeStmt = db.prepare(
+    "SELECT height, time_stamp, raw FROM blocks WHERE height BETWEEN ? AND ? ORDER BY height ASC",
+  );
 
   return {
     db,
@@ -310,6 +367,21 @@ function openDbLayer(file) {
       _mtUpsertStmt.run(no, hash, namespace, mosaic, quantity, divisibility, sender, recipient, timeStamp),
     upsertTxTypeArchive: (filterType, hash, height, sender, recipient, amount, fee, timeStamp, type) =>
       _ttaUpsertStmt.run(filterType, hash, height, sender, recipient, amount, fee, timeStamp, type),
+    upsertExchangeAddress: (address, exchangeName, label) =>
+      _exAddrUpsertStmt.run(address, exchangeName, label),
+    getExchangeAddresses: () => _exAddrAllStmt.all().map(r => ({ ...r })),
+    getExchangeAddressesNeedingBackfill: () => _exAddrPendingStmt.all().map(r => ({ ...r })),
+    markExchangeAddressBackfilled: (address) => _exAddrMarkBackfilledStmt.run(address),
+    bumpExchangeDailyFlow: (date, address, inflow, outflow) =>
+      _exFlowBumpStmt.run(date, address, inflow, outflow),
+    getExchangeDailyFlows: (exchangeName, days) =>
+      _exFlowByExchangeStmt.all(exchangeName, days).reverse().map(r => ({ ...r })),
+    getExchangeList: () => _exListStmt.all().map(r => ({ ...r })),
+    getBlocksHeightRange: () => {
+      const row = _blocksRangeStmt.get();
+      return row ? { minHeight: row.minHeight, maxHeight: row.maxHeight } : { minHeight: null, maxHeight: null };
+    },
+    getBlocksInRange: (from, to) => _blocksInRangeStmt.all(from, to).map(r => ({ ...r })),
   };
 }
 
@@ -437,6 +509,33 @@ export function upsertMosaicTransfer(no, hash, namespace, mosaic, quantity, divi
 }
 export function upsertTxTypeArchive(filterType, hash, height, sender, recipient, amount, fee, timeStamp, type) {
   layer().upsertTxTypeArchive(filterType, hash, height, sender, recipient, amount, fee, timeStamp, type);
+}
+export function upsertExchangeAddress(address, exchangeName, label) {
+  layer().upsertExchangeAddress(address, exchangeName, label);
+}
+export function getExchangeAddresses() {
+  return layer().getExchangeAddresses();
+}
+export function getExchangeAddressesNeedingBackfill() {
+  return layer().getExchangeAddressesNeedingBackfill();
+}
+export function markExchangeAddressBackfilled(address) {
+  layer().markExchangeAddressBackfilled(address);
+}
+export function bumpExchangeDailyFlow(date, address, inflow, outflow) {
+  layer().bumpExchangeDailyFlow(date, address, inflow, outflow);
+}
+export function getExchangeDailyFlows(exchangeName, days) {
+  return layer().getExchangeDailyFlows(exchangeName, days);
+}
+export function getExchangeList() {
+  return layer().getExchangeList();
+}
+export function getBlocksHeightRange() {
+  return layer().getBlocksHeightRange();
+}
+export function getBlocksInRange(from, to) {
+  return layer().getBlocksInRange(from, to);
 }
 
 // Exported for the rare cases where cache.js needs raw DB access

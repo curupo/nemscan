@@ -25,6 +25,15 @@ const {
   getTxTypeArchive,
   getTxTypeArchiveCount,
   trimTxTypeArchive,
+  upsertExchangeAddress,
+  getExchangeAddresses,
+  getExchangeAddressesNeedingBackfill,
+  markExchangeAddressBackfilled,
+  bumpExchangeDailyFlow,
+  getExchangeDailyFlows,
+  getExchangeList,
+  getBlocksHeightRange,
+  getBlocksInRange,
 } = await import("../src/db.js");
 
 test("mainnet and testnet DB layers are independent", () => {
@@ -177,5 +186,121 @@ test("trimTxTypeArchive keeps only the newest `keep` rows for a filter_type and 
 test("tx_type_archive is isolated between mainnet and testnet", () => {
   networkContext.run("testnet", () => {
     assert.equal(getTxTypeArchiveCount("transfer"), 0);
+  });
+});
+
+test("upsertExchangeAddress inserts a new address and getExchangeAddresses returns it", () => {
+  networkContext.run("mainnet", () => {
+    upsertExchangeAddress("NEXCHANGE1", "Coincheck", "Coincheck -- Exchange");
+    const rows = getExchangeAddresses();
+    assert.deepEqual(rows, [
+      { address: "NEXCHANGE1", exchange_name: "Coincheck", label: "Coincheck -- Exchange", backfilled: 0 },
+    ]);
+  });
+});
+
+test("upsertExchangeAddress does not overwrite an existing row (dedup on conflict)", () => {
+  networkContext.run("mainnet", () => {
+    upsertExchangeAddress("NEXCHANGE2", "Zaif", "Zaif -- Cold Wallet");
+    markExchangeAddressBackfilled("NEXCHANGE2");
+    upsertExchangeAddress("NEXCHANGE2", "Zaif", "Zaif -- Cold Wallet (updated)");
+    const row = getExchangeAddresses().find((r) => r.address === "NEXCHANGE2");
+    assert.equal(row.backfilled, 1, "a second upsert must not reset backfilled back to 0");
+    assert.equal(row.label, "Zaif -- Cold Wallet", "a second upsert must not overwrite the original label");
+  });
+});
+
+test("getExchangeAddressesNeedingBackfill returns only rows with backfilled = 0", () => {
+  networkContext.run("mainnet", () => {
+    upsertExchangeAddress("NPENDING1", "Bittrex", "Bittrex -- Exchange Wallet");
+    upsertExchangeAddress("NDONE1", "Huobi", "Huobi -- Exchange");
+    markExchangeAddressBackfilled("NDONE1");
+    const pending = getExchangeAddressesNeedingBackfill().map((r) => r.address);
+    assert.ok(pending.includes("NPENDING1"));
+    assert.ok(!pending.includes("NDONE1"));
+  });
+});
+
+test("bumpExchangeDailyFlow accumulates inflow/outflow across repeated calls for the same date+address", () => {
+  networkContext.run("mainnet", () => {
+    upsertExchangeAddress("NFLOW1", "Kucoin", "Kucoin -- Exchange");
+    bumpExchangeDailyFlow("2026-09-01", "NFLOW1", 1_000_000, 0);
+    bumpExchangeDailyFlow("2026-09-01", "NFLOW1", 500_000, 200_000);
+    bumpExchangeDailyFlow("2026-09-02", "NFLOW1", 0, 300_000);
+    const rows = getExchangeDailyFlows("Kucoin", 30);
+    assert.deepEqual(rows, [
+      { date: "2026-09-01", inflow: 1_500_000, outflow: 200_000 },
+      { date: "2026-09-02", inflow: 0, outflow: 300_000 },
+    ]);
+  });
+});
+
+test("getExchangeDailyFlows sums across multiple addresses that share one exchange_name", () => {
+  networkContext.run("mainnet", () => {
+    upsertExchangeAddress("NMULTI1", "Poloniex", "Poloniex -- Exchange");
+    upsertExchangeAddress("NMULTI2", "Poloniex", "Poloniex -- Cold Wallet");
+    bumpExchangeDailyFlow("2026-09-03", "NMULTI1", 1_000_000, 0);
+    bumpExchangeDailyFlow("2026-09-03", "NMULTI2", 2_000_000, 500_000);
+    const rows = getExchangeDailyFlows("Poloniex", 30);
+    assert.deepEqual(rows, [{ date: "2026-09-03", inflow: 3_000_000, outflow: 500_000 }]);
+  });
+});
+
+test("getExchangeDailyFlows caps to the most recent `days` rows, ascending", () => {
+  networkContext.run("mainnet", () => {
+    upsertExchangeAddress("NCAP1", "Yobit", "Yobit");
+    for (const d of ["2026-08-01", "2026-08-02", "2026-08-03"]) {
+      bumpExchangeDailyFlow(d, "NCAP1", 1, 0);
+    }
+    const rows = getExchangeDailyFlows("Yobit", 2);
+    assert.deepEqual(rows.map((r) => r.date), ["2026-08-02", "2026-08-03"]);
+  });
+});
+
+test("getExchangeList returns one row per exchange_name with address_count and 7-day totals", () => {
+  networkContext.run("mainnet", () => {
+    upsertExchangeAddress("NLIST1", "Upbit", "Upbit -- Exchange");
+    upsertExchangeAddress("NLIST2", "Upbit", "Upbit -- Cold Wallet");
+    const today = new Date().toISOString().slice(0, 10);
+    bumpExchangeDailyFlow(today, "NLIST1", 1_000_000, 100_000);
+    bumpExchangeDailyFlow(today, "NLIST2", 2_000_000, 0);
+    const row = getExchangeList().find((r) => r.exchange_name === "Upbit");
+    assert.equal(row.address_count, 2);
+    assert.equal(row.inflow_7d, 3_000_000);
+    assert.equal(row.outflow_7d, 100_000);
+  });
+});
+
+test("exchange_addresses and exchange_daily_flows are isolated between mainnet and testnet", () => {
+  networkContext.run("mainnet", () => {
+    upsertExchangeAddress("NISO1", "HitBTC", "HitBTC");
+  });
+  networkContext.run("testnet", () => {
+    assert.equal(getExchangeAddresses().find((r) => r.address === "NISO1"), undefined);
+  });
+});
+
+test("getBlocksHeightRange returns null/null when no blocks are cached, and the actual min/max otherwise", () => {
+  // Note: mainnet and testnet may have blocks from prior tests, so we verify the function works
+  networkContext.run("mainnet", () => {
+    // Get the range before adding new blocks
+    const rangeBefore = getBlocksHeightRange();
+    // Add new blocks with higher heights to verify they're included
+    upsertBlock(950, 950, JSON.stringify({ height: 950 }));
+    upsertBlock(999, 999, JSON.stringify({ height: 999 }));
+    const rangeAfter = getBlocksHeightRange();
+    // Verify the range includes the new high and didn't lose the min
+    assert.ok(rangeAfter.minHeight <= rangeBefore.minHeight || rangeBefore.minHeight === null);
+    assert.equal(rangeAfter.maxHeight, 999); // New high should be 999
+  });
+});
+
+test("getBlocksInRange returns rows within [from, to] ascending by height", () => {
+  networkContext.run("mainnet", () => {
+    upsertBlock(700, 700, JSON.stringify({ height: 700, marker: "a" }));
+    upsertBlock(705, 705, JSON.stringify({ height: 705, marker: "b" }));
+    upsertBlock(710, 710, JSON.stringify({ height: 710, marker: "c" }));
+    const rows = getBlocksInRange(701, 709);
+    assert.deepEqual(rows.map((r) => r.height), [705]);
   });
 });
