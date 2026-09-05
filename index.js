@@ -58,6 +58,9 @@ import {
   getMosaicTransfersCount,
   getTxTypeArchive,
   getTxTypeArchiveCount,
+  getExchangeList,
+  getExchangeDailyFlows,
+  getExchangeAddresses,
 } from "./src/db.js";
 import {
   truncHash,
@@ -81,6 +84,11 @@ import {
   heroPolls,
   heroNodes,
   heroAccounts,
+  heroExchanges,
+  heroExchange,
+  exchangeOverviewHTML,
+  exchangeDetailHTML,
+  exchangeNotFoundHTML,
   blocksTableHTML,
   blockDetailHTML,
   txDetailHTML,
@@ -997,6 +1005,74 @@ app.get("/api/accounts/more", async (req, res) => {
   } catch (err) {
     res.status(503);
     res.send("");
+  }
+});
+
+// Exchanges
+app.get("/exchanges", (req, res) => {
+  const base = `${req.protocol}://${req.get("host")}`;
+  res.setHeader("Content-Type", "text/html");
+  res.send(
+    shell(
+      "Exchanges - NEMSCAN",
+      heroExchanges(),
+      "exchanges-card",
+      "/api/exchanges",
+      `<div class="loading"><div class="spinner"></div><span>Loading exchange flows…</span></div>`,
+      "/exchanges",
+      "Track daily XEM inflow and outflow for known exchange wallets on NEMSCAN.",
+      `${base}/exchanges`,
+    ),
+  );
+});
+
+app.get("/api/exchanges", (req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  if (currentNetwork() === "testnet") {
+    return res.send(unavailableOnTestnetHTML("Exchanges"));
+  }
+  try {
+    res.send(exchangeOverviewHTML(getExchangeList()));
+  } catch (err) {
+    res.status(503);
+    res.send(errorFrag(err.message, "/api/exchanges", "#exchanges-card"));
+  }
+});
+
+app.get("/exchange/:name", (req, res) => {
+  const name = req.params.name;
+  const base = `${req.protocol}://${req.get("host")}`;
+  res.setHeader("Content-Type", "text/html");
+  res.send(
+    shell(
+      `${name} - NEMSCAN`,
+      heroExchange(name),
+      "exchange-detail",
+      `/api/exchange/${encodeURIComponent(name)}`,
+      `<div class="loading"><div class="spinner"></div><span>Loading…</span></div>`,
+      "/exchanges",
+      `Daily XEM inflow and outflow for ${name} on NEMSCAN.`,
+      `${base}/exchange/${encodeURIComponent(name)}`,
+    ),
+  );
+});
+
+app.get("/api/exchange/:name", (req, res) => {
+  const name = req.params.name;
+  res.setHeader("Content-Type", "text/html");
+  if (currentNetwork() === "testnet") {
+    return res.send(unavailableOnTestnetHTML("Exchanges"));
+  }
+  try {
+    if (!getExchangeAddresses().some((a) => a.exchange_name === name)) {
+      return res.send(exchangeNotFoundHTML(name));
+    }
+    const data = getExchangeDailyFlows(name, 30);
+    res.send(exchangeDetailHTML(name, data));
+  } catch (err) {
+    res
+      .status(503)
+      .send(errorFrag(err.message, `/api/exchange/${encodeURIComponent(name)}`, "#exchange-detail"));
   }
 });
 
