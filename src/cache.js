@@ -679,7 +679,11 @@ export async function scanBlockHeightsForDailyTx(heights) {
       } catch (err) {
         console.error("Block persistence failed:", err.message);
       }
-      extractExchangeFlowsFromBlock(block, exchangeWatchMap);
+      try {
+        extractExchangeFlowsFromBlock(block, exchangeWatchMap);
+      } catch (err) {
+        console.error("Exchange flow extraction failed:", err.message);
+      }
     }
     if (i + BATCH < heights.length)
       await new Promise((r) => setTimeout(r, ARCHIVE_PAGE_DELAY_MS));
