@@ -155,3 +155,21 @@ export const NETWORKS = {
     dbFile: `${DB_DIR}/cache-testnet.db`,
   },
 };
+
+// Substring-matched (case-insensitive) against nemnodes.org richlist `info`
+// labels (e.g. "Coincheck -- Exchange", "Zaif -- Cold Wallet") to identify
+// which richlist addresses belong to a known exchange. Deliberately a fixed
+// list rather than "any non-empty info value" — labels like "Protocol
+// Treasury Account" or contributor names must not be picked up.
+export const KNOWN_EXCHANGE_NAMES = [
+  "Binance", "Bittrex", "Coincheck", "Zaif", "Poloniex", "HitBTC",
+  "Kucoin", "Cryptopia", "Yobit", "Kuna", "Qryptos", "Coinsuper",
+  "Upbit", "Huobi", "Bitflyer",
+];
+
+// Height-range size for one chunk of the local blocks-table backfill scan
+// that runs when a new exchange address is discovered (see
+// backfillNewExchangeAddresses in cache.js). This is a local SQLite read,
+// not a network call, so it can be far larger than the network-bound
+// DAILY_TX_BACKFILL_CHUNK (60).
+export const EXCHANGE_BACKFILL_CHUNK_HEIGHTS = 5000;

@@ -15,7 +15,7 @@ import {
   timeAgo,
   truncKey,
   truncHash,
-  pubKeyToAddress,
+  addrFromPubKey,
   xem,
   formatDiff,
   formatImportance,
@@ -81,13 +81,6 @@ export function xemPriceHTML() {
   const up = changePct >= 0;
   const sign = up ? "+" : "";
   return `<div class="xem-price">XEM Price: <strong>$${formatUsdPrice(price)}</strong> <span class="${up ? "price-up" : "price-down"}">(${sign}${changePct.toFixed(2)}%)</span></div>`;
-}
-
-// Resolves the correct NIS1 address network byte (mainnet 0x68 / testnet
-// 0x98) for the request currently being rendered. Replaces direct
-// pubKeyToAddress(...) calls throughout this file.
-function addrFromPubKey(hex) {
-  return pubKeyToAddress(hex, NETWORKS[currentNetwork()].addressNetworkByte);
 }
 
 export function nodeSwitchHTML() {

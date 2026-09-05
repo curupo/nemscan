@@ -1,6 +1,7 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { ripemd160 } from "@noble/hashes/legacy.js";
-import { NEM_EPOCH_MS } from "./constants.js";
+import { NEM_EPOCH_MS, NETWORKS, KNOWN_EXCHANGE_NAMES } from "./constants.js";
+import { currentNetwork } from "./context.js";
 
 export function nemDate(ts) {
   return new Date(NEM_EPOCH_MS + ts * 1000);
@@ -61,6 +62,23 @@ export function pubKeyToAddress(hex, net = 0x68) {
   const addr = _b32(raw);
   _addrCache.set(cacheKey, addr);
   return addr;
+}
+
+// Resolves the correct NIS1 address network byte (mainnet 0x68 / testnet
+// 0x98) for the request currently being rendered. Moved here from html.js
+// so cache.js can also resolve tx.signer addresses when extracting
+// exchange inflow/outflow from cached block data.
+export function addrFromPubKey(hex) {
+  return pubKeyToAddress(hex, NETWORKS[currentNetwork()].addressNetworkByte);
+}
+
+// Case-insensitive substring match of a richlist `info` label against
+// KNOWN_EXCHANGE_NAMES. Returns the matched canonical name, or null if the
+// label doesn't name a known exchange (or is empty).
+export function matchExchangeName(info) {
+  if (!info) return null;
+  const lower = info.toLowerCase();
+  return KNOWN_EXCHANGE_NAMES.find((name) => lower.includes(name.toLowerCase())) ?? null;
 }
 
 export function xem(v) {

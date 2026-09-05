@@ -2,9 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   pubKeyToAddress,
+  matchExchangeName,
+  addrFromPubKey,
   parseMosaicIdQuery,
   mosaicFilterFromQuery,
 } from "../src/helpers.js";
+import { networkContext } from "../src/context.js";
 
 test("pubKeyToAddress caches per network byte, not just per public key", () => {
   const hex =
@@ -12,6 +15,28 @@ test("pubKeyToAddress caches per network byte, not just per public key", () => {
   const mainnetAddr = pubKeyToAddress(hex, 0x68);
   const testnetAddr = pubKeyToAddress(hex, 0x98);
   assert.notEqual(mainnetAddr, testnetAddr);
+});
+
+test("matchExchangeName matches a known exchange name case-insensitively inside a richlist label", () => {
+  assert.equal(matchExchangeName("Coincheck -- Exchange"), "Coincheck");
+  assert.equal(matchExchangeName("ZAIF -- Cold Wallet"), "Zaif");
+});
+
+test("matchExchangeName returns null for labels that don't name a known exchange", () => {
+  assert.equal(matchExchangeName("Protocol Treasury Account"), null);
+  assert.equal(matchExchangeName(""), null);
+  assert.equal(matchExchangeName(null), null);
+});
+
+test("addrFromPubKey resolves using the current network's address byte", () => {
+  const hex =
+    "17013b69a0194ff6d2699e830509ef491e9bbd65cb9ffdc935edd677a4d37b29";
+  networkContext.run("mainnet", () => {
+    assert.equal(addrFromPubKey(hex), pubKeyToAddress(hex, 0x68));
+  });
+  networkContext.run("testnet", () => {
+    assert.equal(addrFromPubKey(hex), pubKeyToAddress(hex, 0x98));
+  });
 });
 
 test("parseMosaicIdQuery splits a valid ns:m query and lowercases it", () => {
