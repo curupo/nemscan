@@ -564,7 +564,11 @@ export async function backfillNewExchangeAddresses() {
   for (let from = minHeight; from <= maxHeight; from += EXCHANGE_BACKFILL_CHUNK_HEIGHTS) {
     const to = Math.min(from + EXCHANGE_BACKFILL_CHUNK_HEIGHTS - 1, maxHeight);
     for (const row of getBlocksInRange(from, to)) {
-      extractExchangeFlowsFromBlock(JSON.parse(row.raw), watchMap);
+      try {
+        extractExchangeFlowsFromBlock(JSON.parse(row.raw), watchMap);
+      } catch (err) {
+        console.error("Exchange backfill: skipping unparseable block", row.height, err.message);
+      }
     }
     await new Promise((r) => setImmediate(r));
   }
@@ -684,10 +688,21 @@ export function extractExchangeFlowsFromBlock(block, watchMap) {
   const dateKey = dateKeyFromTs(block.timeStamp);
   for (const tx of block.transactions || []) {
     if (tx.type !== 257) continue;
+    // A v2 transfer carrying attached mosaics uses tx.amount as a multiplier
+    // applied to each mosaic's quantity, not as a XEM quantity itself —
+    // counting it here would record a phantom XEM flow.
+    if (tx.mosaics?.length) continue;
     const amount = tx.amount || 0;
     const sender = addrFromPubKey(tx.signer);
-    if (watchMap.has(sender)) bumpExchangeDailyFlow(dateKey, sender, 0, amount);
-    if (watchMap.has(tx.recipient)) bumpExchangeDailyFlow(dateKey, tx.recipient, amount, 0);
+    const senderExchange = watchMap.get(sender);
+    const recipientExchange = watchMap.get(tx.recipient);
+    // Sender and recipient both belong to the same exchange (e.g. an
+    // internal hot-wallet-to-cold-wallet move) — recording this as both an
+    // outflow and an inflow would double-book a transfer that never left
+    // the exchange.
+    if (senderExchange && senderExchange === recipientExchange) continue;
+    if (senderExchange) bumpExchangeDailyFlow(dateKey, sender, 0, amount);
+    if (recipientExchange) bumpExchangeDailyFlow(dateKey, tx.recipient, amount, 0);
   }
 }
 

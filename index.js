@@ -1045,7 +1045,7 @@ app.get("/exchange/:name", (req, res) => {
   res.setHeader("Content-Type", "text/html");
   res.send(
     shell(
-      `${name} - NEMSCAN`,
+      `${esc(name)} - NEMSCAN`,
       heroExchange(name),
       "exchange-detail",
       `/api/exchange/${encodeURIComponent(name)}`,
@@ -1094,6 +1094,7 @@ app.get("/sitemap.xml", (req, res) => {
     "/accounts",
     "/nodes",
     "/polls",
+    "/exchanges",
   ];
   const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.map((u) => `  <url><loc>${base}${u}</loc></url>`).join("\n")}\n</urlset>`;
   res.setHeader("Content-Type", "application/xml");

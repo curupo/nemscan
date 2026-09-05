@@ -369,6 +369,9 @@ function openDbLayer(file) {
       _ttaUpsertStmt.run(filterType, hash, height, sender, recipient, amount, fee, timeStamp, type),
     upsertExchangeAddress: (address, exchangeName, label) =>
       _exAddrUpsertStmt.run(address, exchangeName, label),
+    // node:sqlite returns null-prototype rows; spread into a plain object so
+    // assert.deepEqual (prototype-sensitive under node:assert/strict) can
+    // compare them against plain object literals in tests.
     getExchangeAddresses: () => _exAddrAllStmt.all().map(r => ({ ...r })),
     getExchangeAddressesNeedingBackfill: () => _exAddrPendingStmt.all().map(r => ({ ...r })),
     markExchangeAddressBackfilled: (address) => _exAddrMarkBackfilledStmt.run(address),
@@ -381,7 +384,7 @@ function openDbLayer(file) {
       const row = _blocksRangeStmt.get();
       return row ? { minHeight: row.minHeight, maxHeight: row.maxHeight } : { minHeight: null, maxHeight: null };
     },
-    getBlocksInRange: (from, to) => _blocksInRangeStmt.all(from, to).map(r => ({ ...r })),
+    getBlocksInRange: (from, to) => _blocksInRangeStmt.all(from, to),
   };
 }
 

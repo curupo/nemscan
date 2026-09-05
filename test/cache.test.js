@@ -51,7 +51,7 @@ const {
 // cache.db/cache-testnet.db instead of the scratch dir. See the file-top
 // comment on NEMSCAN_DB_DIR.
 const { TX_LIST_FILTER_TYPES, TX_TYPE_ARCHIVE_WINDOW } = await import("../src/constants.js");
-const { addrFromPubKey, matchExchangeName } = await import("../src/helpers.js");
+const { addrFromPubKey } = await import("../src/helpers.js");
 
 function mockFetchOnce(t, jsonBody, ok = true) {
   t.mock.method(global, "fetch", async () => ({
@@ -473,6 +473,49 @@ test("extractExchangeFlowsFromBlock is a no-op for an empty watch map", () => {
   );
 });
 
+test("extractExchangeFlowsFromBlock excludes mosaic-attached transfers (tx.amount is a multiplier, not XEM, when mosaics are present)", () => {
+  networkContext.run("mainnet", () => {
+    const watchMap = new Map([["NMOSAICWATCH1", "MosaicTestEx"]]);
+    const block = {
+      timeStamp: 5500,
+      transactions: [
+        {
+          type: 257,
+          signer: "ee".repeat(32),
+          recipient: "NMOSAICWATCH1",
+          amount: 1_000_000,
+          mosaics: [{ mosaicId: { namespaceId: "some", name: "mosaic" }, quantity: 5 }],
+        },
+      ],
+    };
+    extractExchangeFlowsFromBlock(block, watchMap);
+    const rows = getExchangeDailyFlows("MosaicTestEx", 5);
+    assert.equal(rows.length, 0, "a mosaic-attached transfer must not be counted as XEM inflow");
+  });
+});
+
+test("extractExchangeFlowsFromBlock does not double-book an intra-exchange transfer as both inflow and outflow", () => {
+  networkContext.run("mainnet", () => {
+    const signerHex = "ff".repeat(32);
+    const senderAddr = addrFromPubKey(signerHex);
+    upsertExchangeAddress(senderAddr, "SameEx", "SameEx -- Exchange hot wallet");
+    upsertExchangeAddress("NSAMEEXCOLD1", "SameEx", "SameEx -- Exchange cold wallet");
+    const watchMap = new Map([
+      [senderAddr, "SameEx"],
+      ["NSAMEEXCOLD1", "SameEx"],
+    ]);
+    const block = {
+      timeStamp: 5600,
+      transactions: [
+        { type: 257, signer: signerHex, recipient: "NSAMEEXCOLD1", amount: 3_000_000 },
+      ],
+    };
+    extractExchangeFlowsFromBlock(block, watchMap);
+    const rows = getExchangeDailyFlows("SameEx", 5);
+    assert.equal(rows.length, 0, "an internal transfer within the same exchange must not be recorded as inflow or outflow");
+  });
+});
+
 test("scanBlockHeightsForDailyTx records exchange flows for a currently-watched address", async (t) => {
   const signerHex =
     "17013b69a0194ff6d2699e830509ef491e9bbd65cb9ffdc935edd677a4d37b29";
@@ -554,9 +597,49 @@ test("backfillNewExchangeAddresses scans existing cached blocks for a newly-adde
   });
 });
 
+test("backfillNewExchangeAddresses skips an unparseable cached block instead of aborting the whole backfill", async () => {
+  await networkContext.run("mainnet", async () => {
+    const signerHex = "22".repeat(32);
+    const exchangeAddr = addrFromPubKey(signerHex);
+
+    // A corrupt row (invalid JSON) alongside a valid one in the same
+    // height range being backfilled — the corrupt row must be skipped
+    // (and logged), not abort the whole backfill.
+    upsertBlock(2002, 8002, "{not valid json");
+    upsertBlock(2003, 8003, JSON.stringify({
+      height: 2003,
+      timeStamp: 8003,
+      transactions: [{ type: 257, signer: signerHex, recipient: "NSOMEONE3", amount: 6_000_000 }],
+    }));
+
+    upsertExchangeAddress(exchangeAddr, "CorruptRowEx", "CorruptRowEx -- Exchange");
+    await assert.doesNotReject(() => backfillNewExchangeAddresses());
+
+    const rows = getExchangeDailyFlows("CorruptRowEx", 5);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].outflow, 6_000_000);
+    assert.equal(
+      getExchangeAddressesNeedingBackfill().find((r) => r.address === exchangeAddr),
+      undefined,
+      "the address must still be marked backfilled despite the corrupt row",
+    );
+  });
+});
+
 test("backfillNewExchangeAddresses is a no-op when there is nothing pending", async () => {
   await networkContext.run("mainnet", async () => {
+    // Earlier tests in this shared-DB file register several exchange
+    // addresses (via upsertExchangeAddress/extractExchangeFlowsFromBlock)
+    // without backfilling them, so getExchangeAddressesNeedingBackfill()
+    // would otherwise still be non-empty here — mark them all backfilled
+    // first to genuinely reach the empty-pending state this test means to
+    // exercise (the early-return path in backfillNewExchangeAddresses).
+    for (const { address } of getExchangeAddressesNeedingBackfill()) {
+      markExchangeAddressBackfilled(address);
+    }
+    assert.deepEqual(getExchangeAddressesNeedingBackfill(), []);
     await assert.doesNotReject(() => backfillNewExchangeAddresses());
+    assert.deepEqual(getExchangeAddressesNeedingBackfill(), []);
   });
 });
 
