@@ -827,8 +827,12 @@ test("syncExchangeAddressesFromRichList is idempotent — running it twice doesn
 
 test("backfillNewExchangeAddresses scans existing cached blocks for a newly-added address and marks it backfilled", async () => {
   await networkContext.run("mainnet", async () => {
-    const signerHex =
-      "17013b69a0194ff6d2699e830509ef491e9bbd65cb9ffdc935edd677a4d37b29";
+    // A distinct fixture pubkey, not the one Task 3's tests already
+    // registered in this same shared test/cache.test.js DB (as
+    // "LiveHookEx") — reusing it would hit exchange_addresses' PRIMARY KEY
+    // on `address` and upsertExchangeAddress's INSERT OR IGNORE would
+    // silently keep "LiveHookEx" instead of registering "BackfillEx" here.
+    const signerHex = "dd".repeat(32);
     const exchangeAddr = addrFromPubKey(signerHex);
 
     upsertBlock(2000, 8000, JSON.stringify({
