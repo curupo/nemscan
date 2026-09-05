@@ -167,6 +167,18 @@ export const KNOWN_EXCHANGE_NAMES = [
   "Upbit", "Huobi", "Bitflyer",
 ];
 
+// Addresses for exchanges that nemnodes.org's richlist never labels (so
+// syncExchangeAddressesFromRichList's substring match against
+// KNOWN_EXCHANGE_NAMES can never find them). Pinned here instead and synced
+// by syncManualExchangeAddresses, which runs alongside the richlist sync.
+export const MANUAL_EXCHANGE_ADDRESSES = [
+  {
+    address: "NBAAWBHKCDASQBQLG6H2Z3IM4TS4QYKYJBRHL2JL",
+    exchangeName: "Poloniex",
+    label: "Poloniex (manual — unlabeled on nemnodes.org richlist)",
+  },
+];
+
 // Height-range size for one chunk of the local blocks-table backfill scan
 // that runs when a new exchange address is discovered (see
 // backfillNewExchangeAddresses in cache.js). This is a local SQLite read,

@@ -43,6 +43,7 @@ import {
   TX_LIST_FILTER_TYPES,
   TX_TYPE_ARCHIVE_WINDOW,
   EXCHANGE_BACKFILL_CHUNK_HEIGHTS,
+  MANUAL_EXCHANGE_ADDRESSES,
 } from "./constants.js";
 import { currentNetwork, networkContext } from "./context.js";
 
@@ -528,6 +529,7 @@ export async function refreshRichListCache() {
     }
     setCacheMeta("richlist_updated_at", Date.now());
     syncExchangeAddressesFromRichList();
+    syncManualExchangeAddresses();
     await backfillNewExchangeAddresses();
   } catch (err) {
     console.error("Rich list cache refresh failed:", err.message);
@@ -545,6 +547,15 @@ export function syncExchangeAddressesFromRichList() {
   for (const row of getCachedRichList(total)) {
     const name = matchExchangeName(row.info);
     if (name) upsertExchangeAddress(row.address, name, row.info);
+  }
+}
+
+// Registers MANUAL_EXCHANGE_ADDRESSES (exchanges nemnodes.org's richlist
+// never labels, so the substring match above can never find them). Safe to
+// call repeatedly, same as syncExchangeAddressesFromRichList.
+export function syncManualExchangeAddresses() {
+  for (const { address, exchangeName, label } of MANUAL_EXCHANGE_ADDRESSES) {
+    upsertExchangeAddress(address, exchangeName, label);
   }
 }
 

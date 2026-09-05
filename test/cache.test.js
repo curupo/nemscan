@@ -24,6 +24,7 @@ const {
   fetchUnconfirmedTxs,
   extractExchangeFlowsFromBlock,
   syncExchangeAddressesFromRichList,
+  syncManualExchangeAddresses,
   backfillNewExchangeAddresses,
   refreshRichListCache,
 } = await import("../src/cache.js");
@@ -50,7 +51,8 @@ const {
 // db.js's NETWORKS through it) resolve against the real repo-root
 // cache.db/cache-testnet.db instead of the scratch dir. See the file-top
 // comment on NEMSCAN_DB_DIR.
-const { TX_LIST_FILTER_TYPES, TX_TYPE_ARCHIVE_WINDOW } = await import("../src/constants.js");
+const { TX_LIST_FILTER_TYPES, TX_TYPE_ARCHIVE_WINDOW, MANUAL_EXCHANGE_ADDRESSES } =
+  await import("../src/constants.js");
 const { addrFromPubKey } = await import("../src/helpers.js");
 
 function mockFetchOnce(t, jsonBody, ok = true) {
@@ -682,5 +684,51 @@ test("refreshRichListCache also syncs and backfills exchange addresses", async (
     const row = getExchangeAddresses().find((r) => r.address === "NWIRED1");
     assert.ok(row, "expected refreshRichListCache to have registered the Kuna address");
     assert.equal(row.exchange_name, "Kuna");
+  });
+});
+
+// Some exchanges (e.g. Poloniex) are never labeled on nemnodes.org's
+// richlist, so syncExchangeAddressesFromRichList's label-matching can never
+// find them. MANUAL_EXCHANGE_ADDRESSES is the escape hatch: addresses pinned
+// in source rather than discovered from richlist labels.
+test("syncManualExchangeAddresses registers every configured manual address", () => {
+  assert.ok(
+    MANUAL_EXCHANGE_ADDRESSES.length > 0,
+    "expected at least one manual exchange address to be configured",
+  );
+  networkContext.run("mainnet", () => {
+    syncManualExchangeAddresses();
+    const addrs = getExchangeAddresses();
+    for (const entry of MANUAL_EXCHANGE_ADDRESSES) {
+      const row = addrs.find((r) => r.address === entry.address);
+      assert.ok(row, `expected manual address ${entry.address} to be registered`);
+      assert.equal(row.exchange_name, entry.exchangeName);
+    }
+  });
+});
+
+test("syncManualExchangeAddresses is idempotent — running it twice doesn't reset backfilled state", () => {
+  networkContext.run("mainnet", () => {
+    syncManualExchangeAddresses();
+    const [{ address }] = MANUAL_EXCHANGE_ADDRESSES;
+    markExchangeAddressBackfilled(address);
+    syncManualExchangeAddresses();
+    const row = getExchangeAddresses().find((r) => r.address === address);
+    assert.equal(row.backfilled, 1);
+  });
+});
+
+test("refreshRichListCache also registers manual exchange addresses not present on the richlist", async (t) => {
+  t.mock.method(global, "fetch", async () => ({
+    ok: true,
+    status: 200,
+    text: async () => "",
+  }));
+  await networkContext.run("mainnet", async () => {
+    await refreshRichListCache();
+    const [{ address, exchangeName }] = MANUAL_EXCHANGE_ADDRESSES;
+    const row = getExchangeAddresses().find((r) => r.address === address);
+    assert.ok(row, "expected refreshRichListCache to have registered the manual address");
+    assert.equal(row.exchange_name, exchangeName);
   });
 });
