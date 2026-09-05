@@ -858,7 +858,8 @@ a {
     fill: var(--text-2);
     text-anchor: middle;
 }
-.daily-tx-chart .daily-tx-axis {
+.daily-tx-chart .daily-tx-axis,
+.exchange-flow-chart .daily-tx-axis {
     font-size: 8px;
     fill: var(--text-4);
     text-anchor: middle;

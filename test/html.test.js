@@ -468,6 +468,21 @@ test("exchangeDetailHTML includes the chart and the exchange name", () => {
   assert.match(html, /class="exchange-flow-chart"/);
 });
 
+test("exchangeDetailHTML labels the count badge as active days, not calendar days", () => {
+  // The backing query returns the most recent N *rows with recorded flow*,
+  // not the most recent N calendar days, so "Nd" misleadingly implies a
+  // fixed time window when the data can span far more than N days.
+  const html = exchangeDetailHTML(
+    "Zaif",
+    [
+      { date: "2026-01-13", inflow: 1, outflow: 0 },
+      { date: "2026-06-01", inflow: 0, outflow: 1 },
+    ],
+    [],
+  );
+  assert.match(html, /class="count-badge">2 active days</);
+});
+
 test("exchangeDetailHTML links each tracked address to its account page", () => {
   const html = exchangeDetailHTML(
     "Zaif",

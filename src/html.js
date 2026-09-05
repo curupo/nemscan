@@ -372,7 +372,7 @@ export function themeInitScript() {
     closeMenus();
     location.href = '/';
   };
-  document.addEventListener('click', closeMenus);
+  document.addEventListener('click', function() { closeMenus(); });
   document.addEventListener('DOMContentLoaded', function() { sync(theme); });
 })();
 </script>`;
@@ -714,7 +714,7 @@ export function exchangeDetailHTML(name, data, addresses) {
     { inflow: 0, outflow: 0 },
   );
   return `<div class="card-head">
-    <div class="card-title">${esc(name)} <span class="count-badge">${data.length}d</span></div>
+    <div class="card-title">${esc(name)} <span class="count-badge">${data.length} active day${data.length === 1 ? "" : "s"}</span></div>
     <span class="total-txt">In: <strong>${xem(totals.inflow)} XEM</strong> &middot; Out: <strong>${xem(totals.outflow)} XEM</strong></span>
   </div>
   <div style="padding:16px;">${exchangeFlowChartHTML(data)}</div>
