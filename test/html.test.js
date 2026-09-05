@@ -33,9 +33,12 @@ const {
   txTypeArchiveMoreRows,
   renderUnconfirmedTxRow,
   unconfirmedTxListHTML,
+  heroExchanges,
+  exchangeMiniFlowChartHTML,
+  exchangeOverviewHTML,
 } = await import("../src/html.js");
 const { refreshNodeOptions } = await import("../src/nodePool.js");
-const { upsertMosaicTransfer, upsertTxTypeArchive } = await import("../src/db.js");
+const { upsertMosaicTransfer, upsertTxTypeArchive, upsertExchangeAddress, bumpExchangeDailyFlow } = await import("../src/db.js");
 
 test("globalTxMoreRows keeps the Load More control when a scan window finds zero txs but the chain isn't exhausted", () => {
   // getTxsFromBlocks legitimately returns items: [] with nextFromBlock >= 1
@@ -382,4 +385,43 @@ test("unconfirmedTxListHTML renders a row per item and the pending count", () =>
   assert.match(html, /<strong>2<\/strong> pending/);
   assert.match(html, /href="\/account\/S"/);
   assert.match(html, /href="\/account\/S2"/);
+});
+
+test("heroExchanges renders a simple title hero", () => {
+  assert.match(heroExchanges(), /<h1>Exchanges<\/h1>/);
+});
+
+test("exchangeMiniFlowChartHTML shows a collecting-data placeholder for fewer than 2 days of data", () => {
+  assert.match(exchangeMiniFlowChartHTML([]), /Collecting data/);
+  assert.match(exchangeMiniFlowChartHTML([{ date: "2026-09-01", inflow: 1, outflow: 0 }]), /Collecting data/);
+});
+
+test("exchangeMiniFlowChartHTML renders one point per day of data as an SVG polyline", () => {
+  const html = exchangeMiniFlowChartHTML([
+    { date: "2026-09-01", inflow: 1_000_000, outflow: 200_000 },
+    { date: "2026-09-02", inflow: 500_000, outflow: 900_000 },
+    { date: "2026-09-03", inflow: 2_000_000, outflow: 0 },
+  ]);
+  assert.match(html, /<svg class="exchange-mini-chart"/);
+  const points = html.match(/points="([^"]+)"/)[1].trim().split(/\s+/);
+  assert.equal(points.length, 3);
+});
+
+test("exchangeOverviewHTML shows an empty state when no exchanges are tracked yet", () => {
+  const html = exchangeOverviewHTML([]);
+  assert.match(html, /class="empty-state"/);
+});
+
+test("exchangeOverviewHTML renders a card per exchange with its 7-day totals and a link to its detail page", () => {
+  networkContext.run("mainnet", () => {
+    upsertExchangeAddress("NCARD1", "Bitflyer", "Bitflyer -- Exchange");
+    bumpExchangeDailyFlow("2026-09-01", "NCARD1", 5_000_000, 1_000_000);
+    const html = exchangeOverviewHTML([
+      { exchange_name: "Bitflyer", address_count: 1, inflow_7d: 5_000_000, outflow_7d: 1_000_000 },
+    ]);
+    assert.match(html, /Bitflyer/);
+    assert.match(html, /href="\/exchange\/Bitflyer"/);
+    assert.match(html, /5\.00/); // xem() formats 5,000,000 micro-XEM as "5.00"
+    assert.match(html, /1\.00/);
+  });
 });

@@ -9,6 +9,7 @@ import {
   getMosaicsWithArchiveCount,
   getMosaicTransfersCount,
   getTxTypeArchiveCount,
+  getExchangeDailyFlows,
 } from "./db.js";
 import {
   nemDate,
@@ -514,6 +515,12 @@ export function heroNodes() {
   </div></div>`;
 }
 
+export function heroExchanges() {
+  return `<div class="hero"><div class="hero-inner">
+    <h1>Exchanges</h1>
+  </div></div>`;
+}
+
 export function renderPollRow(p, num) {
   const expired = Date.now() > p.doe;
   const typeName = p.type === 1 ? "White List" : "POI";
@@ -621,6 +628,52 @@ export function dailyTxChartHTML() {
     <polyline class="daily-tx-line" points="${line}"/>
     ${dots}${valLabels}${axisLabels}
   </svg>`;
+}
+
+// Same minimal-SVG-line approach as dailyTxChartHTML, plotting net flow
+// (inflow - outflow) per day for one exchange's overview card.
+export function exchangeMiniFlowChartHTML(data) {
+  if (data.length < 2)
+    return `<div class="daily-tx-empty">Collecting data&hellip;</div>`;
+  const vals = data.map((d) => d.inflow - d.outflow);
+  const min = Math.min(...vals, 0);
+  const max = Math.max(...vals, 0);
+  const range = max - min || 1;
+  const W = 260, padX = 4, top = 4, bottom = 46;
+  const stepX = (W - padX * 2) / (data.length - 1);
+  const points = vals
+    .map((v, i) => {
+      const x = padX + i * stepX;
+      const y = bottom - ((v - min) / range) * (bottom - top);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+  return `<svg class="exchange-mini-chart" viewBox="0 0 ${W} 50" role="img" aria-label="Net flow trend">
+    <polyline class="exchange-mini-line" points="${points}"/>
+  </svg>`;
+}
+
+export function exchangeOverviewHTML(list) {
+  if (!list.length) {
+    return `<div class="empty-state">No known exchange addresses tracked yet.</div>`;
+  }
+  const cards = list
+    .map((e) => {
+      const daily = getExchangeDailyFlows(e.exchange_name, 14);
+      return `<a class="exchange-card" href="/exchange/${encodeURIComponent(e.exchange_name)}">
+      <div class="exchange-card-head">
+        <div class="exchange-card-name">${esc(e.exchange_name)}</div>
+        <div class="exchange-card-addrs">${e.address_count} address${e.address_count === 1 ? "" : "es"}</div>
+      </div>
+      <div class="exchange-card-stats">
+        <div class="exchange-card-stat"><span class="exchange-stat-label">7D IN</span><span class="exchange-stat-val in">${xem(e.inflow_7d)} XEM</span></div>
+        <div class="exchange-card-stat"><span class="exchange-stat-label">7D OUT</span><span class="exchange-stat-val out">${xem(e.outflow_7d)} XEM</span></div>
+      </div>
+      ${exchangeMiniFlowChartHTML(daily)}
+    </a>`;
+    })
+    .join("");
+  return `<div class="exchange-grid">${cards}</div>`;
 }
 
 export function homeStatsHTML(height, avgBlockSecs) {

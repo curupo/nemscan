@@ -868,6 +868,74 @@ a {
     color: var(--muted);
     padding: 16px 0;
 }
+.exchange-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 14px;
+    padding: 16px;
+}
+.exchange-card {
+    display: block;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color .15s;
+}
+.exchange-card:hover {
+    border-color: var(--link);
+}
+.exchange-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+}
+.exchange-card-name {
+    font-weight: 600;
+    font-size: 15px;
+}
+.exchange-card-addrs {
+    font-size: 11px;
+    color: var(--muted);
+}
+.exchange-card-stats {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 8px;
+}
+.exchange-card-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.exchange-stat-label {
+    font-size: 10px;
+    letter-spacing: .05em;
+    color: var(--muted);
+}
+.exchange-stat-val.in {
+    color: var(--green);
+    font-weight: 600;
+    font-size: 13px;
+}
+.exchange-stat-val.out {
+    color: var(--red);
+    font-weight: 600;
+    font-size: 13px;
+}
+.exchange-mini-chart {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+.exchange-mini-chart .exchange-mini-line {
+    fill: none;
+    stroke: var(--link);
+    stroke-width: 2;
+}
 .home-panels {
     display: grid;
     grid-template-columns: 1fr 1fr;
