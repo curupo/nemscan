@@ -430,6 +430,21 @@ test("exchangeOverviewHTML renders a card per exchange with its 7-day totals and
   });
 });
 
+test("exchangeOverviewHTML shows a combined 7-day IN/OUT total across all tracked exchanges", () => {
+  const html = exchangeOverviewHTML([
+    { exchange_name: "Bitflyer", address_count: 1, inflow_7d: 5_000_000, outflow_7d: 1_000_000 },
+    { exchange_name: "Zaif", address_count: 2, inflow_7d: 2_000_000, outflow_7d: 3_000_000 },
+  ]);
+  assert.match(html, /class="exchange-totals"/);
+  assert.match(html, />7\.00 XEM</); // combined 7D IN: 5.00 + 2.00
+  assert.match(html, />4\.00 XEM</); // combined 7D OUT: 1.00 + 3.00
+});
+
+test("exchangeOverviewHTML omits the combined total when no exchanges are tracked", () => {
+  const html = exchangeOverviewHTML([]);
+  assert.doesNotMatch(html, /class="exchange-totals"/);
+});
+
 test("heroExchange renders the exchange name as the title", () => {
   assert.match(heroExchange("Coincheck"), /<h1>Coincheck<\/h1>/);
 });
@@ -448,9 +463,28 @@ test("exchangeFlowChartHTML renders one inflow bar and one outflow bar per day",
 });
 
 test("exchangeDetailHTML includes the chart and the exchange name", () => {
-  const html = exchangeDetailHTML("Zaif", [{ date: "2026-09-01", inflow: 1, outflow: 1 }]);
+  const html = exchangeDetailHTML("Zaif", [{ date: "2026-09-01", inflow: 1, outflow: 1 }], []);
   assert.match(html, /Zaif/);
   assert.match(html, /class="exchange-flow-chart"/);
+});
+
+test("exchangeDetailHTML links each tracked address to its account page", () => {
+  const html = exchangeDetailHTML(
+    "Zaif",
+    [{ date: "2026-09-01", inflow: 1, outflow: 1 }],
+    [
+      { address: "NABCDEF1", label: "Zaif -- Hot Wallet" },
+      { address: "NABCDEF2", label: null },
+    ],
+  );
+  assert.match(html, /href="\/account\/NABCDEF1"/);
+  assert.match(html, /href="\/account\/NABCDEF2"/);
+  assert.match(html, /Zaif -- Hot Wallet/);
+});
+
+test("exchangeDetailHTML shows a message when no addresses are tracked yet for the exchange", () => {
+  const html = exchangeDetailHTML("Zaif", [{ date: "2026-09-01", inflow: 1, outflow: 1 }], []);
+  assert.match(html, /No tracked addresses/);
 });
 
 test("exchangeNotFoundHTML names the missing exchange", () => {

@@ -1064,11 +1064,12 @@ app.get("/api/exchange/:name", (req, res) => {
     return res.send(unavailableOnTestnetHTML("Exchanges"));
   }
   try {
-    if (!getExchangeAddresses().some((a) => a.exchange_name === name)) {
+    const addresses = getExchangeAddresses().filter((a) => a.exchange_name === name);
+    if (!addresses.length) {
       return res.send(exchangeNotFoundHTML(name));
     }
     const data = getExchangeDailyFlows(name, 30);
-    res.send(exchangeDetailHTML(name, data));
+    res.send(exchangeDetailHTML(name, data, addresses));
   } catch (err) {
     res
       .status(503)

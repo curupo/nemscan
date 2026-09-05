@@ -695,7 +695,20 @@ export function exchangeFlowChartHTML(data) {
   </svg>`;
 }
 
-export function exchangeDetailHTML(name, data) {
+export function exchangeAddressListHTML(addresses) {
+  if (!addresses.length) {
+    return `<div class="exchange-addr-list empty-state">No tracked addresses for this exchange yet.</div>`;
+  }
+  const rows = addresses
+    .map(
+      (a) =>
+        `<li class="exchange-addr-row"><a href="/account/${esc(a.address)}" class="mono-link" title="${esc(a.address)}">${truncKey(a.address)}</a>${a.label ? ` <span class="exchange-addr-label">${esc(a.label)}</span>` : ""}</li>`,
+    )
+    .join("");
+  return `<ul class="exchange-addr-list">${rows}</ul>`;
+}
+
+export function exchangeDetailHTML(name, data, addresses) {
   const totals = data.reduce(
     (acc, d) => ({ inflow: acc.inflow + d.inflow, outflow: acc.outflow + d.outflow }),
     { inflow: 0, outflow: 0 },
@@ -704,7 +717,9 @@ export function exchangeDetailHTML(name, data) {
     <div class="card-title">${esc(name)} <span class="count-badge">${data.length}d</span></div>
     <span class="total-txt">In: <strong>${xem(totals.inflow)} XEM</strong> &middot; Out: <strong>${xem(totals.outflow)} XEM</strong></span>
   </div>
-  <div style="padding:16px;">${exchangeFlowChartHTML(data)}</div>`;
+  <div style="padding:16px;">${exchangeFlowChartHTML(data)}</div>
+  <div class="card-head"><div class="card-title">Tracked Addresses</div></div>
+  <div style="padding:16px;">${exchangeAddressListHTML(addresses)}</div>`;
 }
 
 export function exchangeNotFoundHTML(name) {
@@ -719,6 +734,14 @@ export function exchangeOverviewHTML(list) {
   if (!list.length) {
     return `<div class="empty-state">No known exchange addresses tracked yet.</div>`;
   }
+  const totals = list.reduce(
+    (acc, e) => ({ inflow_7d: acc.inflow_7d + e.inflow_7d, outflow_7d: acc.outflow_7d + e.outflow_7d }),
+    { inflow_7d: 0, outflow_7d: 0 },
+  );
+  const totalsHTML = `<div class="exchange-totals">
+    <div class="exchange-card-stat"><span class="exchange-stat-label">7D IN (all exchanges)</span><span class="exchange-stat-val in">${xem(totals.inflow_7d)} XEM</span></div>
+    <div class="exchange-card-stat"><span class="exchange-stat-label">7D OUT (all exchanges)</span><span class="exchange-stat-val out">${xem(totals.outflow_7d)} XEM</span></div>
+  </div>`;
   const cards = list
     .map((e) => {
       const daily = getExchangeDailyFlows(e.exchange_name, 14);
@@ -735,7 +758,7 @@ export function exchangeOverviewHTML(list) {
     </a>`;
     })
     .join("");
-  return `<div class="exchange-grid">${cards}</div>`;
+  return `${totalsHTML}<div class="exchange-grid">${cards}</div>`;
 }
 
 export function homeStatsHTML(height, avgBlockSecs) {
