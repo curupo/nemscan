@@ -23,6 +23,9 @@ const {
   refreshTxTypeArchive,
   fetchUnconfirmedTxs,
   extractExchangeFlowsFromBlock,
+  syncExchangeAddressesFromRichList,
+  backfillNewExchangeAddresses,
+  refreshRichListCache,
 } = await import("../src/cache.js");
 const {
   getCachedBlock,
@@ -34,6 +37,12 @@ const {
   upsertTxTypeArchive,
   upsertExchangeAddress,
   getExchangeDailyFlows,
+  getCachedRichList,
+  upsertRichListEntry,
+  getExchangeAddresses,
+  getExchangeAddressesNeedingBackfill,
+  markExchangeAddressBackfilled,
+  upsertBlock,
 } = await import("../src/db.js");
 // Dynamic import, not a static `import ... from` — a static import is
 // hoisted ahead of *everything* in this module, including the
@@ -42,7 +51,7 @@ const {
 // cache.db/cache-testnet.db instead of the scratch dir. See the file-top
 // comment on NEMSCAN_DB_DIR.
 const { TX_LIST_FILTER_TYPES, TX_TYPE_ARCHIVE_WINDOW } = await import("../src/constants.js");
-const { addrFromPubKey } = await import("../src/helpers.js");
+const { addrFromPubKey, matchExchangeName } = await import("../src/helpers.js");
 
 function mockFetchOnce(t, jsonBody, ok = true) {
   t.mock.method(global, "fetch", async () => ({
@@ -489,5 +498,79 @@ test("scanBlockHeightsForDailyTx records exchange flows for a currently-watched 
     const rows = getExchangeDailyFlows("LiveHookEx", 5);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].outflow, 7_000_000);
+  });
+});
+
+test("syncExchangeAddressesFromRichList registers only richlist rows whose info matches a known exchange name", () => {
+  networkContext.run("mainnet", () => {
+    upsertRichListEntry(1, "NKNOWN1", 1_000_000, "Bittrex -- Exchange Wallet");
+    upsertRichListEntry(2, "NUNKNOWN1", 2_000_000, "Protocol Treasury Account");
+    upsertRichListEntry(3, "NKNOWN2", 3_000_000, "");
+    syncExchangeAddressesFromRichList();
+    const addrs = getExchangeAddresses().map((r) => r.address);
+    assert.ok(addrs.includes("NKNOWN1"));
+    assert.ok(!addrs.includes("NUNKNOWN1"));
+    assert.ok(!addrs.includes("NKNOWN2"));
+    const row = getExchangeAddresses().find((r) => r.address === "NKNOWN1");
+    assert.equal(row.exchange_name, "Bittrex");
+  });
+});
+
+test("syncExchangeAddressesFromRichList is idempotent — running it twice doesn't duplicate or reset rows", () => {
+  networkContext.run("mainnet", () => {
+    upsertRichListEntry(4, "NIDEMPOTENT1", 1, "Yobit");
+    syncExchangeAddressesFromRichList();
+    markExchangeAddressBackfilled("NIDEMPOTENT1");
+    syncExchangeAddressesFromRichList();
+    const row = getExchangeAddresses().find((r) => r.address === "NIDEMPOTENT1");
+    assert.equal(row.backfilled, 1);
+  });
+});
+
+test("backfillNewExchangeAddresses scans existing cached blocks for a newly-added address and marks it backfilled", async () => {
+  await networkContext.run("mainnet", async () => {
+    // A distinct fixture pubkey, not the one Task 3's tests already
+    // registered in this same shared test/cache.test.js DB (as
+    // "LiveHookEx") — reusing it would hit exchange_addresses' PRIMARY KEY
+    // on `address` and upsertExchangeAddress's INSERT OR IGNORE would
+    // silently keep "LiveHookEx" instead of registering "BackfillEx" here.
+    const signerHex = "dd".repeat(32);
+    const exchangeAddr = addrFromPubKey(signerHex);
+
+    upsertBlock(2000, 8000, JSON.stringify({
+      height: 2000,
+      timeStamp: 8000,
+      transactions: [{ type: 257, signer: signerHex, recipient: "NSOMEONE2", amount: 9_000_000 }],
+    }));
+    upsertBlock(2001, 8001, JSON.stringify({ height: 2001, timeStamp: 8001, transactions: [] }));
+
+    upsertExchangeAddress(exchangeAddr, "BackfillEx", "BackfillEx -- Exchange");
+    await backfillNewExchangeAddresses();
+
+    const rows = getExchangeDailyFlows("BackfillEx", 5);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].outflow, 9_000_000);
+    assert.equal(getExchangeAddressesNeedingBackfill().find((r) => r.address === exchangeAddr), undefined);
+  });
+});
+
+test("backfillNewExchangeAddresses is a no-op when there is nothing pending", async () => {
+  await networkContext.run("mainnet", async () => {
+    await assert.doesNotReject(() => backfillNewExchangeAddresses());
+  });
+});
+
+test("refreshRichListCache also syncs and backfills exchange addresses", async (t) => {
+  t.mock.method(global, "fetch", async () => ({
+    ok: true,
+    status: 200,
+    text: async () =>
+      '<tr class="d0"><td>1</td><td>NWIRED1</td><td class="rght">x</td><td class="rght">123</td><td>Kuna -- Exchange</td></tr>',
+  }));
+  await networkContext.run("mainnet", async () => {
+    await refreshRichListCache();
+    const row = getExchangeAddresses().find((r) => r.address === "NWIRED1");
+    assert.ok(row, "expected refreshRichListCache to have registered the Kuna address");
+    assert.equal(row.exchange_name, "Kuna");
   });
 });

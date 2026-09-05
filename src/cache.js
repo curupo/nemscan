@@ -22,6 +22,11 @@ import {
   trimTxTypeArchive,
   getExchangeAddresses,
   bumpExchangeDailyFlow,
+  upsertExchangeAddress,
+  getExchangeAddressesNeedingBackfill,
+  markExchangeAddressBackfilled,
+  getBlocksHeightRange,
+  getBlocksInRange,
 } from "./db.js";
 import {
   nemFetch,
@@ -30,13 +35,14 @@ import {
   getHeight,
   fetchNamespacesFromNode,
 } from "./nemApi.js";
-import { dateKeyFromTs, addrFromPubKey } from "./helpers.js";
+import { dateKeyFromTs, addrFromPubKey, matchExchangeName } from "./helpers.js";
 import {
   DAILY_TX_BACKFILL_CHUNK,
   ARCHIVE_PAGE_DELAY_MS,
   DEEP_REFRESH_BATCH_DELAY_MS,
   TX_LIST_FILTER_TYPES,
   TX_TYPE_ARCHIVE_WINDOW,
+  EXCHANGE_BACKFILL_CHUNK_HEIGHTS,
 } from "./constants.js";
 import { currentNetwork, networkContext } from "./context.js";
 
@@ -521,11 +527,48 @@ export async function refreshRichListCache() {
       upsertRichListEntry(r.rank, r.address, r.balance, r.info);
     }
     setCacheMeta("richlist_updated_at", Date.now());
+    syncExchangeAddressesFromRichList();
+    await backfillNewExchangeAddresses();
   } catch (err) {
     console.error("Rich list cache refresh failed:", err.message);
   } finally {
     _refreshingRichList = false;
   }
+}
+
+// Derives exchange_addresses from the richlist cache's `info` labels
+// (see matchExchangeName). Safe to call repeatedly — upsertExchangeAddress
+// is INSERT OR IGNORE, so a row already marked backfilled stays that way.
+export function syncExchangeAddressesFromRichList() {
+  const total = getCachedRichListCount();
+  if (!total) return;
+  for (const row of getCachedRichList(total)) {
+    const name = matchExchangeName(row.info);
+    if (name) upsertExchangeAddress(row.address, name, row.info);
+  }
+}
+
+// For every exchange address not yet backfilled, scans the *already
+// locally cached* blocks table (no network calls) in fixed-size height
+// chunks, extracting historical inflow/outflow the same way the live hook
+// in scanBlockHeightsForDailyTx does, then marks each address backfilled.
+// Chunked with a yield between ranges because node:sqlite's DatabaseSync
+// is synchronous — a single unchunked full-table read would block the
+// event loop for as long as deserializing every cached block takes.
+export async function backfillNewExchangeAddresses() {
+  const pending = getExchangeAddressesNeedingBackfill();
+  if (!pending.length) return;
+  const { minHeight, maxHeight } = getBlocksHeightRange();
+  if (minHeight == null) return;
+  const watchMap = new Map(pending.map((r) => [r.address, r.exchange_name]));
+  for (let from = minHeight; from <= maxHeight; from += EXCHANGE_BACKFILL_CHUNK_HEIGHTS) {
+    const to = Math.min(from + EXCHANGE_BACKFILL_CHUNK_HEIGHTS - 1, maxHeight);
+    for (const row of getBlocksInRange(from, to)) {
+      extractExchangeFlowsFromBlock(JSON.parse(row.raw), watchMap);
+    }
+    await new Promise((r) => setImmediate(r));
+  }
+  for (const { address } of pending) markExchangeAddressBackfilled(address);
 }
 
 // NIS1 has no "list accounts by balance" endpoint, so a candidate pool of
