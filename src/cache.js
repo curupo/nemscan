@@ -20,6 +20,8 @@ import {
   getMaxMosaicTransferNo,
   upsertTxTypeArchive,
   trimTxTypeArchive,
+  getExchangeAddresses,
+  bumpExchangeDailyFlow,
 } from "./db.js";
 import {
   nemFetch,
@@ -28,7 +30,7 @@ import {
   getHeight,
   fetchNamespacesFromNode,
 } from "./nemApi.js";
-import { dateKeyFromTs } from "./helpers.js";
+import { dateKeyFromTs, addrFromPubKey } from "./helpers.js";
 import {
   DAILY_TX_BACKFILL_CHUNK,
   ARCHIVE_PAGE_DELAY_MS,
@@ -626,6 +628,26 @@ export async function refreshPriceCache() {
 
 // ── Daily TX stats + block persistence ──────────────────────────────────────
 
+// Scans one already-fetched block's Transfer transactions (type 257) for
+// senders/recipients present in `watchMap` (Map<address, exchangeName>),
+// recording outflow for a watched sender and inflow for a watched
+// recipient. Shared by the live hook below and backfillNewExchangeAddresses
+// (see the "Transaction type archive" section further down this file) —
+// both just build a different watchMap and call this the same way. No
+// mosaic-only transfers or multisig-wrapped transfers are unwrapped; only
+// tx.amount (native XEM) on a bare type-257 transaction counts.
+export function extractExchangeFlowsFromBlock(block, watchMap) {
+  if (!watchMap.size) return;
+  const dateKey = dateKeyFromTs(block.timeStamp);
+  for (const tx of block.transactions || []) {
+    if (tx.type !== 257) continue;
+    const amount = tx.amount || 0;
+    const sender = addrFromPubKey(tx.signer);
+    if (watchMap.has(sender)) bumpExchangeDailyFlow(dateKey, sender, 0, amount);
+    if (watchMap.has(tx.recipient)) bumpExchangeDailyFlow(dateKey, tx.recipient, amount, 0);
+  }
+}
+
 // NIS1 has no endpoint for historical transaction counts, so we derive them
 // ourselves by walking blocks one at a time and bucketing each block's
 // transaction count by its UTC calendar date. The full chain is far too many
@@ -638,6 +660,9 @@ export async function refreshPriceCache() {
 // once a given range has been synced (see getBlock() in nemApi.js).
 export async function scanBlockHeightsForDailyTx(heights) {
   const BATCH = 10;
+  const exchangeWatchMap = new Map(
+    getExchangeAddresses().map((r) => [r.address, r.exchange_name]),
+  );
   for (let i = 0; i < heights.length; i += BATCH) {
     const batch = heights.slice(i, i + BATCH);
     const blocks = await Promise.all(
@@ -654,6 +679,7 @@ export async function scanBlockHeightsForDailyTx(heights) {
       } catch (err) {
         console.error("Block persistence failed:", err.message);
       }
+      extractExchangeFlowsFromBlock(block, exchangeWatchMap);
     }
     if (i + BATCH < heights.length)
       await new Promise((r) => setTimeout(r, ARCHIVE_PAGE_DELAY_MS));

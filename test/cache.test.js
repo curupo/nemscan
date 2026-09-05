@@ -22,8 +22,19 @@ const {
   importTxTypeArchive,
   refreshTxTypeArchive,
   fetchUnconfirmedTxs,
+  extractExchangeFlowsFromBlock,
 } = await import("../src/cache.js");
-const { getCachedBlock, getCacheMeta, getMosaicTransfers, getMaxMosaicTransferNo, getTxTypeArchiveCount, getTxTypeArchive, upsertTxTypeArchive } = await import("../src/db.js");
+const {
+  getCachedBlock,
+  getCacheMeta,
+  getMosaicTransfers,
+  getMaxMosaicTransferNo,
+  getTxTypeArchiveCount,
+  getTxTypeArchive,
+  upsertTxTypeArchive,
+  upsertExchangeAddress,
+  getExchangeDailyFlows,
+} = await import("../src/db.js");
 // Dynamic import, not a static `import ... from` — a static import is
 // hoisted ahead of *everything* in this module, including the
 // NEMSCAN_DB_DIR assignment above, which would make constants.js (and
@@ -31,6 +42,7 @@ const { getCachedBlock, getCacheMeta, getMosaicTransfers, getMaxMosaicTransferNo
 // cache.db/cache-testnet.db instead of the scratch dir. See the file-top
 // comment on NEMSCAN_DB_DIR.
 const { TX_LIST_FILTER_TYPES, TX_TYPE_ARCHIVE_WINDOW } = await import("../src/constants.js");
+const { addrFromPubKey } = await import("../src/helpers.js");
 
 function mockFetchOnce(t, jsonBody, ok = true) {
   t.mock.method(global, "fetch", async () => ({
@@ -402,4 +414,80 @@ test("fetchUnconfirmedTxs posts to nemtool's unconfirmedTXList endpoint and retu
 test("fetchUnconfirmedTxs throws on a non-ok response", async (t) => {
   t.mock.method(global, "fetch", async () => ({ ok: false, status: 500, json: async () => [] }));
   await assert.rejects(() => fetchUnconfirmedTxs(), /status 500/);
+});
+
+test("extractExchangeFlowsFromBlock records outflow for a watched sender and inflow for a watched recipient", () => {
+  networkContext.run("mainnet", () => {
+    // Uses its own fixture pubkey (distinct from the one used by the
+    // "scanBlockHeightsForDailyTx records exchange flows..." test below) —
+    // exchange_addresses.address is a primary key, so two tests sharing one
+    // derived address under different exchange_names would collide via
+    // upsertExchangeAddress's INSERT OR IGNORE.
+    const signerHex = "cc".repeat(32);
+    const senderAddr = addrFromPubKey(signerHex);
+    // getExchangeDailyFlows resolves by exchange_name via a JOIN against
+    // exchange_addresses (see src/db.js), so the watched addresses must be
+    // registered there for the assertions below to find the flows that
+    // bumpExchangeDailyFlow writes by address.
+    upsertExchangeAddress(senderAddr, "TestEx", "TestEx -- Exchange");
+    upsertExchangeAddress("NRECIPIENT1", "OtherEx", "OtherEx -- Exchange");
+    const watchMap = new Map([
+      [senderAddr, "TestEx"],
+      ["NRECIPIENT1", "OtherEx"],
+    ]);
+    const block = {
+      timeStamp: 5000,
+      transactions: [
+        { type: 257, signer: signerHex, recipient: "NUNWATCHED", amount: 4_000_000 },
+        { type: 257, signer: "aa".repeat(32), recipient: "NRECIPIENT1", amount: 2_000_000 },
+        { type: 4100, signer: signerHex, recipient: "NRECIPIENT1", amount: 999 },
+      ],
+    };
+    extractExchangeFlowsFromBlock(block, watchMap);
+    const senderFlows = getExchangeDailyFlows("TestEx", 5);
+    assert.equal(senderFlows.length, 1);
+    assert.equal(senderFlows[0].outflow, 4_000_000);
+    assert.equal(senderFlows[0].inflow, 0);
+    const recipientFlows = getExchangeDailyFlows("OtherEx", 5);
+    assert.equal(recipientFlows.length, 1);
+    assert.equal(recipientFlows[0].inflow, 2_000_000);
+    assert.equal(recipientFlows[0].outflow, 0);
+  });
+});
+
+test("extractExchangeFlowsFromBlock is a no-op for an empty watch map", () => {
+  assert.doesNotThrow(() =>
+    extractExchangeFlowsFromBlock(
+      { timeStamp: 1, transactions: [{ type: 257, signer: "aa".repeat(32), recipient: "N", amount: 1 }] },
+      new Map(),
+    ),
+  );
+});
+
+test("scanBlockHeightsForDailyTx records exchange flows for a currently-watched address", async (t) => {
+  const signerHex =
+    "17013b69a0194ff6d2699e830509ef491e9bbd65cb9ffdc935edd677a4d37b29";
+  await networkContext.run("mainnet", async () => {
+    const exchangeAddr = addrFromPubKey(signerHex);
+    upsertExchangeAddress(exchangeAddr, "LiveHookEx", "LiveHookEx -- Exchange");
+
+    t.mock.method(global, "fetch", async (url, opts) => {
+      const { height } = JSON.parse(opts.body);
+      return {
+        ok: true,
+        json: async () => ({
+          height,
+          timeStamp: 6000,
+          transactions: [
+            { type: 257, signer: signerHex, recipient: "NSOMEONE", amount: 7_000_000 },
+          ],
+        }),
+      };
+    });
+
+    await scanBlockHeightsForDailyTx([900]);
+    const rows = getExchangeDailyFlows("LiveHookEx", 5);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].outflow, 7_000_000);
+  });
 });
