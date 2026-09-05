@@ -936,6 +936,22 @@ a {
     stroke: var(--link);
     stroke-width: 2;
 }
+.exchange-flow-chart {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+}
+.exchange-flow-chart .flow-bar-in {
+    fill: var(--green);
+}
+.exchange-flow-chart .flow-bar-out {
+    fill: var(--red);
+}
+.exchange-flow-chart .flow-baseline {
+    stroke: var(--border);
+    stroke-width: 1;
+}
 .home-panels {
     display: grid;
     grid-template-columns: 1fr 1fr;

@@ -187,6 +187,7 @@ export function navHTML(activeHref, hideSearch = false) {
     ["/namespaces", "Namespaces"],
     ["/mosaics", "Mosaics"],
     ["/mosaictransfer", "Mosaic Transfer"],
+    ["/exchanges", "Exchanges"],
     ["/nodes", "Nodes"],
     ["/polls", "Polls"],
   ];
@@ -521,6 +522,12 @@ export function heroExchanges() {
   </div></div>`;
 }
 
+export function heroExchange(name) {
+  return `<div class="hero"><div class="hero-inner">
+    <h1>${esc(name)}</h1>
+  </div></div>`;
+}
+
 export function renderPollRow(p, num) {
   const expired = Date.now() > p.doe;
   const typeName = p.type === 1 ? "White List" : "POI";
@@ -651,6 +658,61 @@ export function exchangeMiniFlowChartHTML(data) {
   return `<svg class="exchange-mini-chart" viewBox="0 0 ${W} 50" role="img" aria-label="Net flow trend">
     <polyline class="exchange-mini-line" points="${points}"/>
   </svg>`;
+}
+
+// Two bars per day (inflow up from a zero baseline, outflow down), no
+// gridlines/legend/value labels — same minimal aesthetic as
+// dailyTxChartHTML, adapted to a two-series bar layout.
+export function exchangeFlowChartHTML(data) {
+  if (!data.length)
+    return `<div class="daily-tx-empty">Collecting data&hellip;</div>`;
+  const W = 640, padX = 6, plotTop = 10, zeroY = 90, plotBottom = 170, axisY = 184;
+  const maxVal = Math.max(...data.map((d) => Math.max(d.inflow, d.outflow)), 1);
+  const n = data.length;
+  const bandW = (W - padX * 2) / n;
+  const barW = Math.min(bandW * 0.6, 18);
+  const bars = data
+    .map((d, i) => {
+      const cx = padX + bandW * i + bandW / 2;
+      const inH = (d.inflow / maxVal) * (zeroY - plotTop);
+      const outH = (d.outflow / maxVal) * (plotBottom - zeroY);
+      return `<rect class="flow-bar-in" x="${(cx - barW / 2).toFixed(1)}" y="${(zeroY - inH).toFixed(1)}" width="${barW.toFixed(1)}" height="${inH.toFixed(1)}"><title>${esc(d.date)} in: ${xem(d.inflow)} XEM</title></rect>
+      <rect class="flow-bar-out" x="${(cx - barW / 2).toFixed(1)}" y="${zeroY.toFixed(1)}" width="${barW.toFixed(1)}" height="${outH.toFixed(1)}"><title>${esc(d.date)} out: ${xem(d.outflow)} XEM</title></rect>`;
+    })
+    .join("");
+  const labelEvery = Math.max(1, Math.ceil(n / 8));
+  const axisLabels = data
+    .map((d, i) => {
+      if (i % labelEvery !== 0) return "";
+      const cx = padX + bandW * i + bandW / 2;
+      const [, m, day] = d.date.split("-").map(Number);
+      return `<text class="daily-tx-axis" x="${cx.toFixed(1)}" y="${axisY}">${m}/${day}</text>`;
+    })
+    .join("");
+  return `<svg class="exchange-flow-chart" viewBox="0 0 ${W} 196" role="img" aria-label="Daily inflow and outflow">
+    <line class="flow-baseline" x1="0" y1="${zeroY}" x2="${W}" y2="${zeroY}"/>
+    ${bars}${axisLabels}
+  </svg>`;
+}
+
+export function exchangeDetailHTML(name, data) {
+  const totals = data.reduce(
+    (acc, d) => ({ inflow: acc.inflow + d.inflow, outflow: acc.outflow + d.outflow }),
+    { inflow: 0, outflow: 0 },
+  );
+  return `<div class="card-head">
+    <div class="card-title">${esc(name)} <span class="count-badge">${data.length}d</span></div>
+    <span class="total-txt">In: <strong>${xem(totals.inflow)} XEM</strong> &middot; Out: <strong>${xem(totals.outflow)} XEM</strong></span>
+  </div>
+  <div style="padding:16px;">${exchangeFlowChartHTML(data)}</div>`;
+}
+
+export function exchangeNotFoundHTML(name) {
+  return `<div class="error-state">
+    <div class="error-icon">⚠</div>
+    <p class="error-title">Exchange not found</p>
+    <p class="error-msg">No tracked exchange named <span class="mono">${esc(name)}</span>.</p>
+  </div>`;
 }
 
 export function exchangeOverviewHTML(list) {

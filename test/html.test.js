@@ -36,6 +36,10 @@ const {
   heroExchanges,
   exchangeMiniFlowChartHTML,
   exchangeOverviewHTML,
+  heroExchange,
+  exchangeFlowChartHTML,
+  exchangeDetailHTML,
+  exchangeNotFoundHTML,
 } = await import("../src/html.js");
 const { refreshNodeOptions } = await import("../src/nodePool.js");
 const { upsertMosaicTransfer, upsertTxTypeArchive, upsertExchangeAddress, bumpExchangeDailyFlow } = await import("../src/db.js");
@@ -424,4 +428,35 @@ test("exchangeOverviewHTML renders a card per exchange with its 7-day totals and
     assert.match(html, /5\.00/); // xem() formats 5,000,000 micro-XEM as "5.00"
     assert.match(html, /1\.00/);
   });
+});
+
+test("heroExchange renders the exchange name as the title", () => {
+  assert.match(heroExchange("Coincheck"), /<h1>Coincheck<\/h1>/);
+});
+
+test("exchangeFlowChartHTML shows a collecting-data placeholder with no data", () => {
+  assert.match(exchangeFlowChartHTML([]), /Collecting data/);
+});
+
+test("exchangeFlowChartHTML renders one inflow bar and one outflow bar per day", () => {
+  const html = exchangeFlowChartHTML([
+    { date: "2026-09-01", inflow: 1_000_000, outflow: 200_000 },
+    { date: "2026-09-02", inflow: 0, outflow: 900_000 },
+  ]);
+  assert.equal((html.match(/class="flow-bar-in"/g) || []).length, 2);
+  assert.equal((html.match(/class="flow-bar-out"/g) || []).length, 2);
+});
+
+test("exchangeDetailHTML includes the chart and the exchange name", () => {
+  const html = exchangeDetailHTML("Zaif", [{ date: "2026-09-01", inflow: 1, outflow: 1 }]);
+  assert.match(html, /Zaif/);
+  assert.match(html, /class="exchange-flow-chart"/);
+});
+
+test("exchangeNotFoundHTML names the missing exchange", () => {
+  assert.match(exchangeNotFoundHTML("Nope"), /Nope/);
+});
+
+test("navHTML includes an Exchanges link", () => {
+  assert.match(navHTML("/exchanges"), /href="\/exchanges"[^>]*class="active"[^>]*>Exchanges/);
 });
