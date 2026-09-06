@@ -33,6 +33,8 @@ const {
   txTypeArchiveMoreRows,
   renderUnconfirmedTxRow,
   unconfirmedTxListHTML,
+  typeSpecificRows,
+  txDetailHTML,
   heroExchanges,
   exchangeMiniFlowChartHTML,
   exchangeOverviewHTML,
@@ -42,7 +44,8 @@ const {
   exchangeNotFoundHTML,
 } = await import("../src/html.js");
 const { refreshNodeOptions } = await import("../src/nodePool.js");
-const { upsertMosaicTransfer, upsertTxTypeArchive, upsertExchangeAddress, bumpExchangeDailyFlow } = await import("../src/db.js");
+const { upsertMosaicTransfer, upsertTxTypeArchive, upsertExchangeAddress, bumpExchangeDailyFlow, upsertMosaic } = await import("../src/db.js");
+const { addrFromPubKey } = await import("../src/helpers.js");
 
 test("globalTxMoreRows keeps the Load More control when a scan window finds zero txs but the chain isn't exhausted", () => {
   // getTxsFromBlocks legitimately returns items: [] with nextFromBlock >= 1
@@ -167,6 +170,13 @@ test("navHTML lists a Mosaic Transfer link and marks it active on /mosaictransfe
 
 test("heroMosaicTransfers renders a Mosaic Transfer heading", () => {
   assert.match(heroMosaicTransfers(), /<h1>Mosaic Transfer<\/h1>/);
+});
+
+test("TX_TYPES has the real NIS1 multisig codes, not the swapped/bogus ones", async () => {
+  const { TX_TYPES } = await import("../src/constants.js");
+  assert.equal(TX_TYPES[4098], "Multisig Signature");
+  assert.equal(TX_TYPES[4100], "Multisig");
+  assert.equal(TX_TYPES[4099], undefined);
 });
 
 test("renderMosaicTransferRow formats quantity using the row's own divisibility and links sender/recipient/mosaic", () => {
@@ -374,6 +384,307 @@ test("renderUnconfirmedTxRow falls back to signature when hash is absent", () =>
 test("renderUnconfirmedTxRow escapes sender/recipient, which come from a third-party feed", () => {
   const tx = { hash: "h", type: 257, sender: '"><script>1</script>', recipient: '"><script>2</script>', amount: 1, fee: 1, timeStamp: 100 };
   assert.doesNotMatch(renderUnconfirmedTxRow(tx), /<script>/);
+});
+
+test("typeSpecificRows shows Recipient/Amount/Message for a plain transfer with no mosaics", () => {
+  const rows = typeSpecificRows({
+    type: 257,
+    recipient: "RECIPADDR",
+    amount: 5_000_000,
+    message: { type: 1, payload: Buffer.from("hi").toString("hex") },
+  });
+  const byLabel = Object.fromEntries(rows);
+  assert.match(byLabel["Recipient"], /href="\/account\/RECIPADDR"/);
+  assert.match(byLabel["Amount"], />5\.00 XEM</);
+  assert.match(byLabel["Message"], />hi</);
+  assert.equal(byLabel["Mosaics"], undefined);
+  assert.equal(byLabel["Multiplier"], undefined);
+});
+
+test("typeSpecificRows shows Multiplier + Mosaics (divided by divisibility) for a mosaic-attached transfer", () => {
+  networkContext.run("mainnet", () => {
+    upsertMosaic(1, "dim", "coin", "CREATOR", "", 6, 1000, 1, 1, 1);
+    const rows = typeSpecificRows({
+      type: 257,
+      recipient: "RECIPADDR",
+      amount: 2_000_000, // multiplier: 2x
+      message: { payload: "" },
+      mosaics: [{ mosaicId: { namespaceId: "dim", name: "coin" }, quantity: 3_000_000 }],
+    });
+    const byLabel = Object.fromEntries(rows);
+    assert.match(byLabel["Multiplier"], />2\.00</);
+    // (3_000_000 * 2_000_000 / 1_000_000) / 10**6 = 6.000000
+    assert.match(byLabel["Mosaics"], /dim:<strong>coin<\/strong> × 6\.000000/);
+    assert.equal(byLabel["Amount"], undefined);
+  });
+});
+
+test("typeSpecificRows falls back to raw quantity (divisibility 0) for a mosaic-attached transfer whose mosaic isn't in the local cache", () => {
+  const rows = typeSpecificRows({
+    type: 257,
+    recipient: "RECIPADDR",
+    amount: 1_000_000,
+    message: { payload: "" },
+    mosaics: [{ mosaicId: { namespaceId: "unknown-ns", name: "unknown-mosaic" }, quantity: 42 }],
+  });
+  const byLabel = Object.fromEntries(rows);
+  // (42 * 1_000_000 / 1_000_000) / 10**0 = 42
+  assert.match(byLabel["Mosaics"], /unknown-ns:<strong>unknown-mosaic<\/strong> × 42/);
+});
+
+test("typeSpecificRows shows the no-message placeholder when a transfer carries no message payload", () => {
+  const rows = typeSpecificRows({ type: 257, recipient: "R", amount: 0, message: null });
+  const byLabel = Object.fromEntries(rows);
+  assert.match(byLabel["Message"], /\(no message\)/);
+});
+
+test("typeSpecificRows shows Mode and Remote Account for an importance transfer", () => {
+  const rows = typeSpecificRows({
+    type: 2049,
+    mode: 1,
+    remoteAccount: "a".repeat(64),
+  });
+  const byLabel = Object.fromEntries(rows);
+  assert.equal(byLabel["Mode"], "Activate");
+  assert.match(byLabel["Remote Account"], /href="\/account\//);
+});
+
+test("typeSpecificRows labels mode 2 as Deactivate", () => {
+  const rows = typeSpecificRows({ type: 2049, mode: 2, remoteAccount: "a".repeat(64) });
+  assert.equal(Object.fromEntries(rows)["Mode"], "Deactivate");
+});
+
+test("typeSpecificRows lists added and removed cosignatories for an aggregate modification, with a sign per entry", () => {
+  const rows = typeSpecificRows({
+    type: 4097,
+    modifications: [
+      { modificationType: 1, cosignatoryAccount: "a".repeat(64) },
+      { modificationType: 2, cosignatoryAccount: "b".repeat(64) },
+    ],
+  });
+  const byLabel = Object.fromEntries(rows);
+  assert.match(byLabel["Modifications"], /^\+ <a/);
+  assert.match(byLabel["Modifications"], /−.*<a/);
+  assert.equal(byLabel["Min Cosignatories Change"], undefined);
+});
+
+test("typeSpecificRows shows a signed Min Cosignatories Change when minCosignatories is present", () => {
+  const rows = typeSpecificRows({
+    type: 4097,
+    modifications: [],
+    minCosignatories: { relativeChange: -1 },
+  });
+  assert.equal(Object.fromEntries(rows)["Min Cosignatories Change"], "-1");
+});
+
+test("typeSpecificRows shows the namespace (parent.newPart), rental fee, and sink for a provision namespace tx", () => {
+  const rows = typeSpecificRows({
+    type: 8193,
+    parent: "dim",
+    newPart: "coin",
+    rentalFee: 5_000_000,
+    rentalFeeSink: "SINKADDR",
+  });
+  const byLabel = Object.fromEntries(rows);
+  assert.match(byLabel["Namespace"], />dim\.coin</);
+  assert.match(byLabel["Rental Fee"], />5\.00 XEM</);
+  assert.match(byLabel["Rental Fee Sink"], /href="\/account\/SINKADDR"/);
+});
+
+test("typeSpecificRows shows a root namespace (no parent) without a leading dot", () => {
+  const rows = typeSpecificRows({
+    type: 8193,
+    parent: null,
+    newPart: "dim",
+    rentalFee: 500_000_000,
+    rentalFeeSink: "SINKADDR",
+  });
+  assert.match(Object.fromEntries(rows)["Namespace"], />dim</);
+});
+
+test("typeSpecificRows shows mosaic id, description, and properties for a mosaic definition creation", () => {
+  const rows = typeSpecificRows({
+    type: 16385,
+    creationFee: 5_000_000,
+    mosaicDefinition: {
+      id: { namespaceId: "dim", name: "coin" },
+      description: "test mosaic",
+      properties: [
+        { name: "divisibility", value: "6" },
+        { name: "initialSupply", value: "1000" },
+        { name: "supplyMutable", value: "true" },
+        { name: "transferable", value: "false" },
+      ],
+    },
+  });
+  const byLabel = Object.fromEntries(rows);
+  assert.match(byLabel["Mosaic"], />dim:coin</);
+  assert.equal(byLabel["Description"], "test mosaic");
+  assert.equal(byLabel["Divisibility"], "6");
+  assert.equal(byLabel["Initial Supply"], "1000");
+  assert.equal(byLabel["Supply Mutable"], "Yes");
+  assert.equal(byLabel["Transferable"], "No");
+  assert.match(byLabel["Creation Fee"], />5\.00 XEM</);
+});
+
+test("typeSpecificRows shows an increase and its human-readable delta for a mosaic supply change", () => {
+  networkContext.run("mainnet", () => {
+    upsertMosaic(1, "dim", "coin", "CREATOR", "", 6, 1000, 1, 1, 1);
+    const rows = typeSpecificRows({
+      type: 16386,
+      mosaicId: { namespaceId: "dim", name: "coin" },
+      supplyType: 1,
+      delta: 5_000_000,
+    });
+    const byLabel = Object.fromEntries(rows);
+    assert.match(byLabel["Mosaic"], />dim:coin</);
+    assert.match(byLabel["Supply Change"], /^\+5000000 \(\+5\.000000\)$/);
+  });
+});
+
+test("typeSpecificRows shows a decrease without a human-readable delta when the mosaic isn't in the local cache", () => {
+  const rows = typeSpecificRows({
+    type: 16386,
+    mosaicId: { namespaceId: "unknown-ns", name: "unknown-mosaic" },
+    supplyType: 2,
+    delta: 10,
+  });
+  assert.equal(Object.fromEntries(rows)["Supply Change"], "−10");
+});
+
+test("txDetailHTML shows Version and Deadline rows", () => {
+  const html = txDetailHTML(
+    {
+      type: 257,
+      version: 0x98000002, // NIS1 mainnet v2 transfer version word; low byte (the version number) is 2
+      timeStamp: 100,
+      deadline: 200,
+      signer: "a".repeat(64),
+      recipient: "R",
+      amount: 0,
+      message: null,
+      fee: 100000,
+      signature: "sig",
+    },
+    "hash1",
+    12345,
+  );
+  assert.match(html, /<div class="ov-label">Version<\/div><div class="ov-value"><span class="mono">2<\/span>/);
+  assert.match(html, /<div class="ov-label">Deadline<\/div>/);
+});
+
+test("txDetailHTML unwraps a multisig (type 4100) wrapper: Sender/Recipient/Amount come from otherTrans, and Initiated By shows the outer signer", () => {
+  const html = txDetailHTML(
+    {
+      type: 4100,
+      version: 1,
+      timeStamp: 100,
+      deadline: 200,
+      signer: "a".repeat(64), // the cosigner who submitted the wrapper
+      fee: 150000,
+      signature: "outersig",
+      otherTrans: {
+        type: 257,
+        signer: "b".repeat(64), // the multisig account
+        recipient: "RECIPADDR",
+        amount: 7_000_000,
+        message: null,
+        fee: 0,
+      },
+    },
+    "hash2",
+    12346,
+  );
+  const innerSenderAddr = addrFromPubKey("b".repeat(64));
+  const outerSignerAddr = addrFromPubKey("a".repeat(64));
+  assert.match(html, new RegExp(`<div class="ov-label">Sender</div><div class="ov-value"><a href="/account/${innerSenderAddr}"`));
+  assert.match(html, new RegExp(`<div class="ov-label">Initiated By</div><div class="ov-value"><a href="/account/${outerSignerAddr}"`));
+  assert.match(html, /href="\/account\/RECIPADDR"/);
+  assert.match(html, />7\.00 XEM</);
+});
+
+test("txDetailHTML shows a Cosigners row when the multisig wrapper carries signatures, and omits it when there are none", () => {
+  const withSigs = txDetailHTML(
+    {
+      type: 4100,
+      version: 1,
+      timeStamp: 100,
+      deadline: 200,
+      signer: "a".repeat(64),
+      fee: 150000,
+      signature: "outersig",
+      signatures: [{ signer: "c".repeat(64) }],
+      otherTrans: { type: 257, signer: "b".repeat(64), recipient: "R", amount: 0, message: null, fee: 0 },
+    },
+    "hash3",
+    12347,
+  );
+  assert.match(withSigs, /<div class="ov-label">Cosigners<\/div>/);
+
+  const noSigs = txDetailHTML(
+    {
+      type: 4100,
+      version: 1,
+      timeStamp: 100,
+      deadline: 200,
+      signer: "a".repeat(64),
+      fee: 150000,
+      signature: "outersig",
+      otherTrans: { type: 257, signer: "b".repeat(64), recipient: "R", amount: 0, message: null, fee: 0 },
+    },
+    "hash4",
+    12348,
+  );
+  assert.doesNotMatch(noSigs, /<div class="ov-label">Cosigners<\/div>/);
+});
+
+test("txDetailHTML shows a wrapped namespace registration's payload rows instead of blank Recipient/Amount", () => {
+  const html = txDetailHTML(
+    {
+      type: 4100,
+      version: 1,
+      timeStamp: 100,
+      deadline: 200,
+      signer: "a".repeat(64),
+      fee: 150000,
+      signature: "outersig",
+      otherTrans: {
+        type: 8193,
+        signer: "b".repeat(64),
+        parent: null,
+        newPart: "dim",
+        rentalFee: 500_000_000,
+        rentalFeeSink: "SINKADDR",
+        fee: 0,
+      },
+    },
+    "hash5",
+    12349,
+  );
+  assert.match(html, /<div class="ov-label">Namespace<\/div>/);
+  assert.doesNotMatch(html, /<div class="ov-label">Recipient<\/div>/);
+});
+
+test("txDetailHTML renders a plain (non-wrapped) transfer exactly as before: no Initiated By/Cosigners rows", () => {
+  const html = txDetailHTML(
+    {
+      type: 257,
+      version: 1,
+      timeStamp: 100,
+      deadline: 200,
+      signer: "a".repeat(64),
+      recipient: "RECIPADDR",
+      amount: 1_000_000,
+      message: null,
+      fee: 100000,
+      signature: "sig",
+    },
+    "hash6",
+    12350,
+  );
+  assert.doesNotMatch(html, /Initiated By/);
+  assert.doesNotMatch(html, /Cosigners/);
+  assert.match(html, /href="\/account\/RECIPADDR"/);
 });
 
 test("unconfirmedTxListHTML shows an empty state when the pool is empty", () => {

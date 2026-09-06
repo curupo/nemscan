@@ -24,8 +24,8 @@ export const TX_TYPES = {
   257: "Transfer",
   2049: "Importance",
   4097: "Multisig Mod",
-  4100: "Multisig Sig",
-  4099: "Multisig",
+  4098: "Multisig Signature",
+  4100: "Multisig",
   8193: "Namespace",
   16385: "Mosaic Def",
   16386: "Mosaic Supply",
@@ -176,6 +176,11 @@ export const MANUAL_EXCHANGE_ADDRESSES = [
     address: "NBAAWBHKCDASQBQLG6H2Z3IM4TS4QYKYJBRHL2JL",
     exchangeName: "Poloniex",
     label: "Poloniex (manual — unlabeled on nemnodes.org richlist)",
+  },
+  {
+    address: "NAGJG3QFWYZ37LMI7IQPSGQNYADGSJZGJRD2DIYA",
+    exchangeName: "Zaif",
+    label: "Zaif (manual — unlabeled on nemnodes.org richlist)",
   },
 ];
 

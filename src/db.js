@@ -2,6 +2,25 @@ import { DatabaseSync } from "node:sqlite";
 import { NETWORKS } from "./constants.js";
 import { currentNetwork } from "./context.js";
 
+// NODE_TEST_CONTEXT is set by Node itself in every process spawned by
+// `node --test`, regardless of how a test file's imports are ordered — so
+// unlike relying on import order, this check can't be defeated by a test
+// file accidentally reaching this module (e.g. via a stray static import)
+// before it sets NEMSCAN_DB_DIR. Every test/*.test.js file that imports
+// this module (directly, or transitively via cache.js/html.js/nemApi.js/
+// index.js) is expected to set NEMSCAN_DB_DIR first; if one doesn't, fail
+// loudly here instead of silently opening (and writing test data into) the
+// real cache.db / cache-testnet.db in the repo root — this happened in
+// practice (see docs/superpowers/plans/2026-09-06-tx-detail-payload.md).
+if (process.env.NODE_TEST_CONTEXT && !process.env.NEMSCAN_DB_DIR) {
+  throw new Error(
+    "NEMSCAN_DB_DIR is not set while running under node --test, and this " +
+      "module is about to open cache.db / cache-testnet.db. Set " +
+      "process.env.NEMSCAN_DB_DIR to a throwaway directory (mkdtempSync) " +
+      "before this test file imports anything that reaches db.js.",
+  );
+}
+
 function openDbLayer(file) {
   const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL");

@@ -10,6 +10,7 @@ import {
   getMosaicTransfersCount,
   getTxTypeArchiveCount,
   getExchangeDailyFlows,
+  getMosaicByNsAndName,
 } from "./db.js";
 import {
   nemDate,
@@ -1237,11 +1238,123 @@ export function blockDetailHTML(block, chainHeight) {
 
 // ── Transaction detail HTML ───────────────────────────────────────────────────
 
+// Returns [label, valueHtml] rows for one transaction's own type-specific
+// payload. Takes an already-unwrapped transaction — a multisig (4100)
+// wrapper's otherTrans, or any bare transaction — so the caller decides
+// what "the transaction" means; this function only ever looks at tx.type.
+export function typeSpecificRows(tx) {
+  if (tx.type === 257) {
+    const rows = [
+      [
+        "Recipient",
+        `<a href="/account/${tx.recipient}" class="mono-link" title="${tx.recipient}">${tx.recipient}</a> <button class="copy-btn" onclick="copy('${tx.recipient}')">copy</button>`,
+      ],
+    ];
+    if (tx.mosaics?.length) {
+      rows.push(["Multiplier", `<span class="mono">${xem(tx.amount)}</span>`]);
+      const mosaicLines = tx.mosaics.map((att) => {
+        const ns = att.mosaicId.namespaceId;
+        const name = att.mosaicId.name;
+        const def = getMosaicByNsAndName(ns, name);
+        const divisibility = def?.divisibility ?? 0;
+        const qty = ((att.quantity * tx.amount) / 1_000_000 / Math.pow(10, divisibility)).toLocaleString(
+          "en",
+          { minimumFractionDigits: divisibility, maximumFractionDigits: divisibility },
+        );
+        return `${esc(ns)}:<strong>${esc(name)}</strong> × ${qty}`;
+      });
+      rows.push(["Mosaics", mosaicLines.join("<br>")]);
+    } else {
+      rows.push(["Amount", `<span class="mono">${xem(tx.amount)} XEM</span>`]);
+    }
+    const msg = decodeMsg(tx.message);
+    rows.push([
+      "Message",
+      msg
+        ? `<span class="msg-text" style="white-space:normal; max-width:none;">${msg}</span>`
+        : '<span class="muted">(no message)</span>',
+    ]);
+    return rows;
+  }
+
+  if (tx.type === 2049) {
+    const remoteAddr = addrFromPubKey(tx.remoteAccount) ?? tx.remoteAccount;
+    return [
+      ["Mode", tx.mode === 1 ? "Activate" : "Deactivate"],
+      [
+        "Remote Account",
+        `<a href="/account/${remoteAddr}" class="mono-link" title="${remoteAddr}">${remoteAddr}</a> <button class="copy-btn" onclick="copy('${remoteAddr}')">copy</button>`,
+      ],
+    ];
+  }
+
+  if (tx.type === 4097) {
+    const modLines = (tx.modifications || []).map((m) => {
+      const addr = addrFromPubKey(m.cosignatoryAccount) ?? m.cosignatoryAccount;
+      const sign = m.modificationType === 1 ? "+" : "−";
+      return `${sign} <a href="/account/${addr}" class="mono-link" title="${addr}">${truncKey(addr)}</a>`;
+    });
+    const rows = [
+      ["Modifications", modLines.join("<br>") || '<span class="muted">—</span>'],
+    ];
+    if (tx.minCosignatories) {
+      const change = tx.minCosignatories.relativeChange;
+      rows.push(["Min Cosignatories Change", change > 0 ? `+${change}` : `${change}`]);
+    }
+    return rows;
+  }
+
+  if (tx.type === 8193) {
+    const namespace = tx.parent ? `${tx.parent}.${tx.newPart}` : tx.newPart;
+    return [
+      ["Namespace", `<span class="mono">${esc(namespace)}</span>`],
+      ["Rental Fee", `<span class="mono">${xem(tx.rentalFee)} XEM</span>`],
+      [
+        "Rental Fee Sink",
+        `<a href="/account/${tx.rentalFeeSink}" class="mono-link" title="${tx.rentalFeeSink}">${tx.rentalFeeSink}</a>`,
+      ],
+    ];
+  }
+
+  if (tx.type === 16385) {
+    const def = tx.mosaicDefinition;
+    const props = Object.fromEntries((def.properties || []).map((p) => [p.name, p.value]));
+    return [
+      ["Mosaic", `<span class="mono">${esc(def.id.namespaceId)}:${esc(def.id.name)}</span>`],
+      ["Description", esc(def.description || "")],
+      ["Divisibility", esc(props.divisibility ?? "0")],
+      ["Initial Supply", esc(props.initialSupply ?? "0")],
+      ["Supply Mutable", props.supplyMutable === "true" ? "Yes" : "No"],
+      ["Transferable", props.transferable === "true" ? "Yes" : "No"],
+      ["Creation Fee", `<span class="mono">${xem(tx.creationFee)} XEM</span>`],
+    ];
+  }
+
+  if (tx.type === 16386) {
+    const def = getMosaicByNsAndName(tx.mosaicId.namespaceId, tx.mosaicId.name);
+    const sign = tx.supplyType === 1 ? "+" : "−";
+    let text = `${sign}${tx.delta}`;
+    if (def) {
+      const human = (tx.delta / Math.pow(10, def.divisibility)).toLocaleString("en", {
+        minimumFractionDigits: def.divisibility,
+        maximumFractionDigits: def.divisibility,
+      });
+      text += ` (${sign}${human})`;
+    }
+    return [
+      ["Mosaic", `<span class="mono">${esc(tx.mosaicId.namespaceId)}:${esc(tx.mosaicId.name)}</span>`],
+      ["Supply Change", text],
+    ];
+  }
+
+  return [];
+}
+
 export function txDetailHTML(tx, hash, height) {
   const date = nemDate(tx.timeStamp);
-  const isT = tx.type === 257;
-  const senderAddr = addrFromPubKey(tx.signer) ?? tx.signer;
-  const msg = decodeMsg(tx.message);
+  const isWrapped = tx.type === 4100 && !!tx.otherTrans;
+  const inner = isWrapped ? tx.otherTrans : tx;
+  const senderAddr = addrFromPubKey(inner.signer) ?? inner.signer;
 
   const rows = [
     [
@@ -1261,36 +1374,43 @@ export function txDetailHTML(tx, hash, height) {
     ],
     [
       "Type",
-      `<span class="type-pill ${isT ? "type-transfer" : "type-other"}">${TX_TYPES[tx.type] || `Type ${tx.type}`}</span>`,
+      `<span class="type-pill ${tx.type === 257 ? "type-transfer" : "type-other"}">${TX_TYPES[tx.type] || `Type ${tx.type}`}</span>`,
+    ],
+    ["Version", `<span class="mono">${tx.version & 0xff}</span>`],
+    [
+      "Deadline",
+      `${nemDate(tx.deadline).toISOString().slice(0, 19).replace("T", " ")} UTC`,
     ],
     [
       "Sender",
       `<a href="/account/${senderAddr}" class="mono-link" title="${senderAddr}">${senderAddr}</a> <button class="copy-btn" onclick="copy('${senderAddr}')">copy</button>`,
     ],
-    [
-      "Recipient",
-      isT
-        ? `<a href="/account/${tx.recipient}" class="mono-link" title="${tx.recipient}">${tx.recipient}</a> <button class="copy-btn" onclick="copy('${tx.recipient}')">copy</button>`
-        : '<span class="muted">—</span>',
-    ],
-    [
-      "Amount",
-      isT
-        ? `<span class="mono">${xem(tx.amount)} XEM</span>`
-        : '<span class="muted">—</span>',
-    ],
-    ["Fee", `<span class="fee-val">${xem(tx.fee)} XEM</span>`],
-    [
-      "Message",
-      msg
-        ? `<span class="msg-text" style="white-space:normal; max-width:none;">${msg}</span>`
-        : '<span class="muted">(no message)</span>',
-    ],
-    [
-      "Signature",
-      `<span class="mono-muted">${truncHash(tx.signature)}</span> <button class="copy-btn" onclick="copy('${tx.signature}')">copy</button>`,
-    ],
-  ]
+  ];
+
+  if (isWrapped) {
+    const initiatorAddr = addrFromPubKey(tx.signer) ?? tx.signer;
+    rows.push([
+      "Initiated By",
+      `<a href="/account/${initiatorAddr}" class="mono-link" title="${initiatorAddr}">${initiatorAddr}</a> <button class="copy-btn" onclick="copy('${initiatorAddr}')">copy</button>`,
+    ]);
+    if (tx.signatures?.length) {
+      const cosignerLines = tx.signatures.map((s) => {
+        const addr = addrFromPubKey(s.signer) ?? s.signer;
+        return `<a href="/account/${addr}" class="mono-link" title="${addr}">${truncKey(addr)}</a>`;
+      });
+      rows.push(["Cosigners", cosignerLines.join("<br>")]);
+    }
+  }
+
+  rows.push(...typeSpecificRows(inner));
+
+  rows.push(["Fee", `<span class="fee-val">${xem(tx.fee)} XEM</span>`]);
+  rows.push([
+    "Signature",
+    `<span class="mono-muted">${truncHash(tx.signature)}</span> <button class="copy-btn" onclick="copy('${tx.signature}')">copy</button>`,
+  ]);
+
+  const rowsHtml = rows
     .map(
       ([l, v]) =>
         `<div class="ov-row"><div class="ov-label">${l}</div><div class="ov-value">${v}</div></div>`,
@@ -1301,7 +1421,7 @@ export function txDetailHTML(tx, hash, height) {
   <div class="card-head">
     <div class="card-title">Overview</div>
   </div>
-  <div class="ov-list">${rows}</div>
+  <div class="ov-list">${rowsHtml}</div>
   <script>
     function copy(text) {
       navigator.clipboard.writeText(text).then(() => {
