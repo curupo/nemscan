@@ -316,6 +316,13 @@ function openDbLayer(file) {
     ORDER BY f.date DESC
     LIMIT ?
   `);
+  const _exFlowByAddressStmt = db.prepare(`
+    SELECT date, inflow, outflow
+    FROM exchange_daily_flows
+    WHERE address = ?
+    ORDER BY date DESC
+    LIMIT ?
+  `);
   const _exListStmt = db.prepare(`
     SELECT
       a.exchange_name AS exchange_name,
@@ -398,6 +405,8 @@ function openDbLayer(file) {
       _exFlowBumpStmt.run(date, address, inflow, outflow),
     getExchangeDailyFlows: (exchangeName, days) =>
       _exFlowByExchangeStmt.all(exchangeName, days).reverse().map(r => ({ ...r })),
+    getExchangeDailyFlowsForAddress: (address, days) =>
+      _exFlowByAddressStmt.all(address, days).reverse().map(r => ({ ...r })),
     getExchangeList: () => _exListStmt.all().map(r => ({ ...r })),
     getBlocksHeightRange: () => {
       const row = _blocksRangeStmt.get();
@@ -549,6 +558,9 @@ export function bumpExchangeDailyFlow(date, address, inflow, outflow) {
 }
 export function getExchangeDailyFlows(exchangeName, days) {
   return layer().getExchangeDailyFlows(exchangeName, days);
+}
+export function getExchangeDailyFlowsForAddress(address, days) {
+  return layer().getExchangeDailyFlowsForAddress(address, days);
 }
 export function getExchangeList() {
   return layer().getExchangeList();

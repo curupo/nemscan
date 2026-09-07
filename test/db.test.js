@@ -31,6 +31,7 @@ const {
   markExchangeAddressBackfilled,
   bumpExchangeDailyFlow,
   getExchangeDailyFlows,
+  getExchangeDailyFlowsForAddress,
   getExchangeList,
   getBlocksHeightRange,
   getBlocksInRange,
@@ -254,6 +255,32 @@ test("getExchangeDailyFlows caps to the most recent `days` rows, ascending", () 
       bumpExchangeDailyFlow(d, "NCAP1", 1, 0);
     }
     const rows = getExchangeDailyFlows("Yobit", 2);
+    assert.deepEqual(rows.map((r) => r.date), ["2026-08-02", "2026-08-03"]);
+  });
+});
+
+test("getExchangeDailyFlowsForAddress returns only rows for the given address, ascending by date", () => {
+  networkContext.run("mainnet", () => {
+    upsertExchangeAddress("NADDR1", "Binance", "Binance -- Exchange");
+    upsertExchangeAddress("NADDR2", "Binance", "Binance -- Cold Wallet");
+    bumpExchangeDailyFlow("2026-09-02", "NADDR1", 500_000, 200_000);
+    bumpExchangeDailyFlow("2026-09-01", "NADDR1", 1_000_000, 0);
+    bumpExchangeDailyFlow("2026-09-01", "NADDR2", 9_000_000, 9_000_000);
+    const rows = getExchangeDailyFlowsForAddress("NADDR1", 30);
+    assert.deepEqual(rows, [
+      { date: "2026-09-01", inflow: 1_000_000, outflow: 0 },
+      { date: "2026-09-02", inflow: 500_000, outflow: 200_000 },
+    ]);
+  });
+});
+
+test("getExchangeDailyFlowsForAddress caps to the most recent `days` rows, ascending", () => {
+  networkContext.run("mainnet", () => {
+    upsertExchangeAddress("NADDR3", "Cryptopia", "Cryptopia -- Exchange");
+    for (const d of ["2026-08-01", "2026-08-02", "2026-08-03"]) {
+      bumpExchangeDailyFlow(d, "NADDR3", 1, 0);
+    }
+    const rows = getExchangeDailyFlowsForAddress("NADDR3", 2);
     assert.deepEqual(rows.map((r) => r.date), ["2026-08-02", "2026-08-03"]);
   });
 });

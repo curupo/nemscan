@@ -60,6 +60,7 @@ import {
   getTxTypeArchiveCount,
   getExchangeList,
   getExchangeDailyFlows,
+  getExchangeDailyFlowsForAddress,
   getExchangeAddresses,
 } from "./src/db.js";
 import {
@@ -88,7 +89,9 @@ import {
   heroExchange,
   exchangeOverviewHTML,
   exchangeDetailHTML,
+  exchangeFlowSectionHTML,
   exchangeNotFoundHTML,
+  exchangeAddressNotFoundHTML,
   blocksTableHTML,
   blockDetailHTML,
   txDetailHTML,
@@ -1074,6 +1077,38 @@ app.get("/api/exchange/:name", (req, res) => {
     res
       .status(503)
       .send(errorFrag(err.message, `/api/exchange/${encodeURIComponent(name)}`, "#exchange-detail"));
+  }
+});
+
+app.get("/api/exchange/:name/flows", (req, res) => {
+  const name = req.params.name;
+  const address = req.query.address;
+  res.setHeader("Content-Type", "text/html");
+  if (currentNetwork() === "testnet") {
+    return res.send(unavailableOnTestnetHTML("Exchanges"));
+  }
+  try {
+    const addresses = getExchangeAddresses().filter((a) => a.exchange_name === name);
+    if (!addresses.length) {
+      return res.send(exchangeNotFoundHTML(name));
+    }
+    if (address && !addresses.some((a) => a.address === address)) {
+      return res.send(exchangeAddressNotFoundHTML(name, address));
+    }
+    const data = address
+      ? getExchangeDailyFlowsForAddress(address, 30)
+      : getExchangeDailyFlows(name, 30);
+    res.send(exchangeFlowSectionHTML(name, data));
+  } catch (err) {
+    res
+      .status(503)
+      .send(
+        errorFrag(
+          err.message,
+          `/api/exchange/${encodeURIComponent(name)}/flows${address ? `?address=${encodeURIComponent(address)}` : ""}`,
+          "#exchange-flow-section",
+        ),
+      );
   }
 });
 

@@ -27,7 +27,7 @@ import {
 import { nodeContext, currentNetwork } from "./context.js";
 import { computeTransferTxHash } from "./txHash.js";
 import { getNodeOptions, getNodeOptionsUpdatedAt, getAutoBestNode } from "./nodePool.js";
-import { TX_TYPES, XEM_TOTAL_SUPPLY, DAILY_TX_DAYS, NETWORKS, TX_LIST_FILTER_TYPES } from "./constants.js";
+import { TX_TYPES, XEM_TOTAL_SUPPLY, DAILY_TX_DAYS, NETWORKS, TX_LIST_FILTER_TYPES, DELISTED_EXCHANGE_NAMES } from "./constants.js";
 
 // ── CSS cache-busting version ───────────────────────────────────────────────────────
 
@@ -524,8 +524,9 @@ export function heroExchanges() {
 }
 
 export function heroExchange(name) {
+  const badge = DELISTED_EXCHANGE_NAMES.includes(name) ? ' <span class="badge-no">Delisted</span>' : "";
   return `<div class="hero"><div class="hero-inner">
-    <h1>${esc(name)}</h1>
+    <h1>${esc(name)}${badge}</h1>
   </div></div>`;
 }
 
@@ -703,13 +704,13 @@ export function exchangeAddressListHTML(addresses) {
   const rows = addresses
     .map(
       (a) =>
-        `<li class="exchange-addr-row"><a href="/account/${esc(a.address)}" class="mono-link" title="${esc(a.address)}">${truncKey(a.address)}</a>${a.label ? ` <span class="exchange-addr-label">${esc(a.label)}</span>` : ""}</li>`,
+        `<li class="exchange-addr-row"><a href="/account/${esc(a.address)}" class="mono-link" title="${esc(a.address)}">${esc(truncKey(a.address))}</a>${a.label ? ` <span class="exchange-addr-label">${esc(a.label)}</span>` : ""}</li>`,
     )
     .join("");
   return `<ul class="exchange-addr-list">${rows}</ul>`;
 }
 
-export function exchangeDetailHTML(name, data, addresses) {
+export function exchangeFlowSectionHTML(name, data) {
   const totals = data.reduce(
     (acc, d) => ({ inflow: acc.inflow + d.inflow, outflow: acc.outflow + d.outflow }),
     { inflow: 0, outflow: 0 },
@@ -718,9 +719,39 @@ export function exchangeDetailHTML(name, data, addresses) {
     <div class="card-title">${esc(name)} <span class="count-badge">${data.length} active day${data.length === 1 ? "" : "s"}</span></div>
     <span class="total-txt">In: <strong>${xem(totals.inflow)} XEM</strong> &middot; Out: <strong>${xem(totals.outflow)} XEM</strong></span>
   </div>
-  <div style="padding:16px;">${exchangeFlowChartHTML(data)}</div>
+  <div style="padding:16px;">${exchangeFlowChartHTML(data)}</div>`;
+}
+
+// Empty for 0-1 tracked addresses (nothing to switch to). For 2+, a Total
+// tab plus one tab per address, reusing the account-detail page's
+// .tab-nav/.tab-btn CSS and hx-get/hx-target/hx-swap pattern — picking a
+// tab re-fetches just #exchange-flow-section from the new
+// /api/exchange/:name/flows route, so the totals line and chart change
+// together.
+export function exchangeAddressTabsHTML(name, addresses) {
+  if (addresses.length <= 1) return "";
+  const encodedName = encodeURIComponent(name);
+  const totalBtn = `<button class="tab-btn active" hx-get="/api/exchange/${encodedName}/flows" hx-target="#exchange-flow-section" hx-swap="innerHTML" onclick="setExchangeTab(this)">Total</button>`;
+  const addrBtns = addresses
+    .map((a) => {
+      const title = a.label ? `${a.address} — ${a.label}` : a.address;
+      return `<button class="tab-btn" hx-get="/api/exchange/${encodedName}/flows?address=${encodeURIComponent(a.address)}" hx-target="#exchange-flow-section" hx-swap="innerHTML" onclick="setExchangeTab(this)" title="${esc(title)}">${esc(truncKey(a.address))}</button>`;
+    })
+    .join("");
+  return `<div class="tab-nav">${totalBtn}${addrBtns}</div>`;
+}
+
+export function exchangeDetailHTML(name, data, addresses) {
+  return `${exchangeAddressTabsHTML(name, addresses)}
+  <div id="exchange-flow-section">${exchangeFlowSectionHTML(name, data)}</div>
   <div class="card-head"><div class="card-title">Tracked Addresses</div></div>
-  <div style="padding:16px;">${exchangeAddressListHTML(addresses)}</div>`;
+  <div style="padding:16px;">${exchangeAddressListHTML(addresses)}</div>
+  <script>
+    function setExchangeTab(el) {
+      el.closest('.tab-nav').querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      el.classList.add('active');
+    }
+  </script>`;
 }
 
 export function exchangeNotFoundHTML(name) {
@@ -728,6 +759,18 @@ export function exchangeNotFoundHTML(name) {
     <div class="error-icon">⚠</div>
     <p class="error-title">Exchange not found</p>
     <p class="error-msg">No tracked exchange named <span class="mono">${esc(name)}</span>.</p>
+  </div>`;
+}
+
+// Distinct from exchangeNotFoundHTML: the exchange exists, but the
+// requested address isn't one of its tracked addresses (only reachable by
+// hand-editing the ?address= query param — the UI only ever links to
+// addresses exchangeAddressTabsHTML itself rendered).
+export function exchangeAddressNotFoundHTML(name, address) {
+  return `<div class="error-state">
+    <div class="error-icon">⚠</div>
+    <p class="error-title">Address not tracked</p>
+    <p class="error-msg"><span class="mono">${esc(address)}</span> is not a tracked address for <span class="mono">${esc(name)}</span>.</p>
   </div>`;
 }
 
@@ -746,7 +789,11 @@ export function exchangeOverviewHTML(list) {
   const cards = list
     .map((e) => {
       const daily = getExchangeDailyFlows(e.exchange_name, 14);
+      const badge = DELISTED_EXCHANGE_NAMES.includes(e.exchange_name)
+        ? '<span class="badge-no exchange-delisted-flag">Delisted</span>'
+        : "";
       return `<a class="exchange-card" href="/exchange/${encodeURIComponent(e.exchange_name)}">
+      ${badge}
       <div class="exchange-card-head">
         <div class="exchange-card-name">${esc(e.exchange_name)}</div>
         <div class="exchange-card-addrs">${e.address_count} address${e.address_count === 1 ? "" : "es"}</div>

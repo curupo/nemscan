@@ -876,6 +876,7 @@ a {
     padding: 16px;
 }
 .exchange-card {
+    position: relative;
     display: block;
     background: var(--surface);
     border: 1px solid var(--border);
@@ -887,6 +888,11 @@ a {
 }
 .exchange-card:hover {
     border-color: var(--link);
+}
+.exchange-delisted-flag {
+    position: absolute;
+    top: -8px;
+    right: 12px;
 }
 .exchange-card-head {
     display: flex;

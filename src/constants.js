@@ -167,6 +167,15 @@ export const KNOWN_EXCHANGE_NAMES = [
   "Upbit", "Huobi", "Bitflyer",
 ];
 
+// Exchanges NEMSCAN still tracks XEM flow history for, but that no longer
+// list XEM for trading. Purely a UI label — flow tracking/display is
+// unaffected. Hardcoded per user-supplied list, same convention as
+// KNOWN_EXCHANGE_NAMES.
+export const DELISTED_EXCHANGE_NAMES = [
+  "Binance", "Bittrex", "Coincheck", "Coinsuper", "Cryptopia", "Huobi",
+  "Kuna", "Qryptos", "Yobit",
+];
+
 // Addresses for exchanges that nemnodes.org's richlist never labels (so
 // syncExchangeAddressesFromRichList's substring match against
 // KNOWN_EXCHANGE_NAMES can never find them). Pinned here instead and synced

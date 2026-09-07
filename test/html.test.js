@@ -40,8 +40,11 @@ const {
   exchangeOverviewHTML,
   heroExchange,
   exchangeFlowChartHTML,
+  exchangeFlowSectionHTML,
+  exchangeAddressTabsHTML,
   exchangeDetailHTML,
   exchangeNotFoundHTML,
+  exchangeAddressNotFoundHTML,
 } = await import("../src/html.js");
 const { refreshNodeOptions } = await import("../src/nodePool.js");
 const { upsertMosaicTransfer, upsertTxTypeArchive, upsertExchangeAddress, bumpExchangeDailyFlow, upsertMosaic } = await import("../src/db.js");
@@ -741,6 +744,20 @@ test("exchangeOverviewHTML renders a card per exchange with its 7-day totals and
   });
 });
 
+test("exchangeOverviewHTML shows a Delisted badge for a delisted exchange", () => {
+  const html = exchangeOverviewHTML([
+    { exchange_name: "Coincheck", address_count: 1, inflow_7d: 0, outflow_7d: 0 },
+  ]);
+  assert.match(html, /class="badge-no exchange-delisted-flag">Delisted</);
+});
+
+test("exchangeOverviewHTML omits the Delisted badge for an active exchange", () => {
+  const html = exchangeOverviewHTML([
+    { exchange_name: "Zaif", address_count: 1, inflow_7d: 0, outflow_7d: 0 },
+  ]);
+  assert.doesNotMatch(html, /Delisted/);
+});
+
 test("exchangeOverviewHTML shows a combined 7-day IN/OUT total across all tracked exchanges", () => {
   const html = exchangeOverviewHTML([
     { exchange_name: "Bitflyer", address_count: 1, inflow_7d: 5_000_000, outflow_7d: 1_000_000 },
@@ -757,7 +774,17 @@ test("exchangeOverviewHTML omits the combined total when no exchanges are tracke
 });
 
 test("heroExchange renders the exchange name as the title", () => {
-  assert.match(heroExchange("Coincheck"), /<h1>Coincheck<\/h1>/);
+  assert.match(heroExchange("Zaif"), /<h1>Zaif<\/h1>/);
+});
+
+test("heroExchange shows a Delisted badge for a delisted exchange", () => {
+  const html = heroExchange("Coincheck");
+  assert.match(html, /<h1>Coincheck/);
+  assert.match(html, /class="badge-no">Delisted</);
+});
+
+test("heroExchange omits the Delisted badge for an active exchange", () => {
+  assert.doesNotMatch(heroExchange("Zaif"), /Delisted/);
 });
 
 test("exchangeFlowChartHTML shows a collecting-data placeholder with no data", () => {
@@ -771,6 +798,37 @@ test("exchangeFlowChartHTML renders one inflow bar and one outflow bar per day",
   ]);
   assert.equal((html.match(/class="flow-bar-in"/g) || []).length, 2);
   assert.equal((html.match(/class="flow-bar-out"/g) || []).length, 2);
+});
+
+test("exchangeFlowSectionHTML renders the exchange name, totals, and chart", () => {
+  const html = exchangeFlowSectionHTML("Zaif", [
+    { date: "2026-09-01", inflow: 1_000_000, outflow: 500_000 },
+  ]);
+  assert.match(html, /Zaif/);
+  assert.match(html, /class="exchange-flow-chart"/);
+  assert.match(html, /1\.00 XEM/);
+  assert.match(html, /0\.50 XEM/);
+  assert.doesNotMatch(html, /tab-nav/, "the flow section must not nest its own tab row on a tab swap");
+});
+
+test("exchangeAddressTabsHTML returns nothing for 0 or 1 tracked addresses", () => {
+  assert.equal(exchangeAddressTabsHTML("Zaif", []), "");
+  assert.equal(
+    exchangeAddressTabsHTML("Zaif", [{ address: "NABCDEF1", label: "Zaif -- Hot Wallet" }]),
+    "",
+  );
+});
+
+test("exchangeAddressTabsHTML renders a Total tab plus one tab per address for 2+ addresses", () => {
+  const html = exchangeAddressTabsHTML("Zaif", [
+    { address: "NABCDEF1", label: "Zaif -- Hot Wallet" },
+    { address: "NABCDEF2", label: null },
+  ]);
+  assert.match(html, /class="tab-nav"/);
+  assert.match(html, /class="tab-btn active"[^>]*hx-get="\/api\/exchange\/Zaif\/flows"[^>]*>Total</);
+  assert.match(html, /hx-get="\/api\/exchange\/Zaif\/flows\?address=NABCDEF1"/);
+  assert.match(html, /hx-get="\/api\/exchange\/Zaif\/flows\?address=NABCDEF2"/);
+  assert.match(html, /hx-target="#exchange-flow-section"/);
 });
 
 test("exchangeDetailHTML includes the chart and the exchange name", () => {
@@ -794,6 +852,29 @@ test("exchangeDetailHTML labels the count badge as active days, not calendar day
   assert.match(html, /class="count-badge">2 active days</);
 });
 
+test("exchangeDetailHTML wraps the flow section and includes tabs for 2+ addresses", () => {
+  const html = exchangeDetailHTML(
+    "Zaif",
+    [{ date: "2026-09-01", inflow: 1, outflow: 1 }],
+    [
+      { address: "NABCDEF1", label: "Zaif -- Hot Wallet" },
+      { address: "NABCDEF2", label: null },
+    ],
+  );
+  assert.match(html, /id="exchange-flow-section"/);
+  assert.match(html, /class="tab-nav"/);
+  assert.match(html, /function setExchangeTab/, "the tab buttons' onclick depends on this being emitted alongside them");
+});
+
+test("exchangeDetailHTML omits tabs when only one address is tracked", () => {
+  const html = exchangeDetailHTML(
+    "Zaif",
+    [{ date: "2026-09-01", inflow: 1, outflow: 1 }],
+    [{ address: "NABCDEF1", label: "Zaif -- Hot Wallet" }],
+  );
+  assert.doesNotMatch(html, /class="tab-nav"/);
+});
+
 test("exchangeDetailHTML links each tracked address to its account page", () => {
   const html = exchangeDetailHTML(
     "Zaif",
@@ -805,7 +886,7 @@ test("exchangeDetailHTML links each tracked address to its account page", () => 
   );
   assert.match(html, /href="\/account\/NABCDEF1"/);
   assert.match(html, /href="\/account\/NABCDEF2"/);
-  assert.match(html, /Zaif -- Hot Wallet/);
+  assert.match(html, /class="exchange-addr-label">Zaif -- Hot Wallet</);
 });
 
 test("exchangeDetailHTML shows a message when no addresses are tracked yet for the exchange", () => {
@@ -815,6 +896,13 @@ test("exchangeDetailHTML shows a message when no addresses are tracked yet for t
 
 test("exchangeNotFoundHTML names the missing exchange", () => {
   assert.match(exchangeNotFoundHTML("Nope"), /Nope/);
+});
+
+test("exchangeAddressNotFoundHTML names both the exchange and the untracked address", () => {
+  const html = exchangeAddressNotFoundHTML("Zaif", "NBOGUS1");
+  assert.match(html, /Zaif/);
+  assert.match(html, /NBOGUS1/);
+  assert.match(html, /not tracked/);
 });
 
 test("navHTML includes an Exchanges link", () => {
