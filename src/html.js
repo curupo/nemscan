@@ -789,10 +789,11 @@ export function exchangeOverviewHTML(list) {
   const cards = list
     .map((e) => {
       const daily = getExchangeDailyFlows(e.exchange_name, 14);
-      const badge = DELISTED_EXCHANGE_NAMES.includes(e.exchange_name)
-        ? '<span class="badge-no exchange-delisted-flag">Delisted</span>'
-        : "";
-      return `<a class="exchange-card" href="/exchange/${encodeURIComponent(e.exchange_name)}">
+      const delisted = DELISTED_EXCHANGE_NAMES.includes(e.exchange_name);
+      const badge = delisted
+        ? '<span class="badge-no exchange-status-flag">Delisted</span>'
+        : '<span class="badge-yes exchange-status-flag">Listed</span>';
+      return `<a class="exchange-card${delisted ? " exchange-card-delisted" : ""}" href="/exchange/${encodeURIComponent(e.exchange_name)}">
       ${badge}
       <div class="exchange-card-head">
         <div class="exchange-card-name">${esc(e.exchange_name)}</div>

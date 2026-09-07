@@ -889,10 +889,16 @@ a {
 .exchange-card:hover {
     border-color: var(--link);
 }
-.exchange-delisted-flag {
+.exchange-status-flag {
     position: absolute;
     top: -8px;
     right: 12px;
+}
+.exchange-card-delisted {
+    background: var(--surface-2);
+}
+.exchange-card-delisted .exchange-card-name {
+    color: var(--muted);
 }
 .exchange-card-head {
     display: flex;

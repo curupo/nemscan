@@ -744,18 +744,21 @@ test("exchangeOverviewHTML renders a card per exchange with its 7-day totals and
   });
 });
 
-test("exchangeOverviewHTML shows a Delisted badge for a delisted exchange", () => {
+test("exchangeOverviewHTML shows a Delisted badge and grayed-out card for a delisted exchange", () => {
   const html = exchangeOverviewHTML([
     { exchange_name: "Coincheck", address_count: 1, inflow_7d: 0, outflow_7d: 0 },
   ]);
-  assert.match(html, /class="badge-no exchange-delisted-flag">Delisted</);
+  assert.match(html, /class="badge-no exchange-status-flag">Delisted</);
+  assert.match(html, /class="exchange-card exchange-card-delisted"/);
 });
 
-test("exchangeOverviewHTML omits the Delisted badge for an active exchange", () => {
+test("exchangeOverviewHTML shows a Listed badge for an active exchange", () => {
   const html = exchangeOverviewHTML([
     { exchange_name: "Zaif", address_count: 1, inflow_7d: 0, outflow_7d: 0 },
   ]);
+  assert.match(html, /class="badge-yes exchange-status-flag">Listed</);
   assert.doesNotMatch(html, /Delisted/);
+  assert.doesNotMatch(html, /exchange-card-delisted/);
 });
 
 test("exchangeOverviewHTML shows a combined 7-day IN/OUT total across all tracked exchanges", () => {
